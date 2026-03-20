@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useUser } from "@clerk/clerk-react";
@@ -35,7 +35,10 @@ const interestOptions = [
 export default function Onboarding() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [uploadingSlotIndex, setUploadingSlotIndex] = useState<number | null>(null);
   const [saveError, setSaveError] = useState("");
+  const [photoError, setPhotoError] = useState("");
   const [formData, setFormData] = useState({
     birthday: "",
     gender: "",
@@ -45,8 +48,78 @@ export default function Onboarding() {
     interests: [] as string[],
     bio: "",
   });
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const selectedSlotRef = useRef(0);
   const navigate = useNavigate();
   const { user } = useUser();
+
+  const openPhotoPicker = (slotIndex: number) => {
+    selectedSlotRef.current = slotIndex;
+    setPhotoError("");
+    photoInputRef.current?.click();
+  };
+
+  const removePhoto = (slotIndex: number) => {
+    setFormData((prev) => {
+      const nextPhotos = [...prev.photos];
+      nextPhotos[slotIndex] = "";
+      return {
+        ...prev,
+        photos: nextPhotos,
+      };
+    });
+  };
+
+  const onPhotoSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setPhotoError("Vui long chon file anh hop le");
+      return;
+    }
+
+    const slotIndex = selectedSlotRef.current;
+    setIsUploadingPhoto(true);
+    setUploadingSlotIndex(slotIndex);
+    setPhotoError("");
+
+    try {
+      const body = new FormData();
+      body.append("file", file);
+
+      const response = await fetch("/api/uploads/photos", {
+        method: "POST",
+        body,
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { message?: string };
+        throw new Error(data.message || "Upload anh that bai");
+      }
+
+      const data = (await response.json()) as { url?: string };
+      if (!data.url) {
+        throw new Error("Khong nhan duoc URL anh");
+      }
+
+      setFormData((prev) => {
+        const nextPhotos = [...prev.photos];
+        nextPhotos[slotIndex] = data.url;
+        return {
+          ...prev,
+          photos: nextPhotos,
+        };
+      });
+    } catch (error) {
+      setPhotoError(error instanceof Error ? error.message : "Upload anh that bai");
+    } finally {
+      setIsUploadingPhoto(false);
+      setUploadingSlotIndex(null);
+    }
+  };
 
   const saveOnboarding = async () => {
     setIsSaving(true);
@@ -62,6 +135,7 @@ export default function Onboarding() {
         gender: formData.gender,
         lookingFor: formData.lookingFor,
         location: formData.location,
+        photos: formData.photos,
         interests: formData.interests,
         bio: formData.bio,
       };
@@ -88,6 +162,14 @@ export default function Onboarding() {
   };
 
   const handleNext = async () => {
+    if (currentStep === 2) {
+      const uploadedPhotoCount = formData.photos.filter((photo) => Boolean(photo && photo.trim())).length;
+      if (uploadedPhotoCount < 2) {
+        setPhotoError("Vui long them it nhat 2 anh truoc khi tiep tuc");
+        return;
+      }
+    }
+
     try {
       await saveOnboarding();
       if (currentStep < steps.length) {
@@ -237,6 +319,13 @@ export default function Onboarding() {
             {/* Step 2: Photos */}
             {currentStep === 2 && (
               <div className="space-y-4">
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={onPhotoSelected}
+                />
                 <p className="text-sm text-muted-foreground">
                   Add at least 2 photos to continue. Your first photo will be your main profile picture.
                 </p>
@@ -244,26 +333,52 @@ export default function Onboarding() {
                   {[...Array(6)].map((_, i) => (
                     <div
                       key={i}
+                      onClick={() => openPhotoPicker(i)}
                       className={cn(
-                        "aspect-[3/4] rounded-xl border-2 border-dashed flex items-center justify-center cursor-pointer transition-colors",
+                        "relative overflow-hidden aspect-[3/4] rounded-xl border-2 border-dashed flex items-center justify-center cursor-pointer transition-colors",
                         i === 0
                           ? "border-primary bg-primary/5"
                           : "border-border hover:border-primary hover:bg-primary/5"
                       )}
                     >
-                      <div className="text-center">
-                        {i === 0 ? (
-                          <Camera className="w-8 h-8 text-primary mx-auto" />
-                        ) : (
-                          <Plus className="w-6 h-6 text-muted-foreground mx-auto" />
-                        )}
-                        {i === 0 && (
-                          <span className="text-xs text-primary mt-1 block">Main</span>
-                        )}
-                      </div>
+                      {formData.photos[i] ? (
+                        <>
+                          <img
+                            src={formData.photos[i]}
+                            alt={`Uploaded photo ${i + 1}`}
+                            className="h-full w-full object-cover"
+                          />
+                          <button
+                            type="button"
+                            className="absolute top-2 right-2 h-7 w-7 rounded-full bg-black/60 text-white text-sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removePhoto(i);
+                            }}
+                          >
+                            x
+                          </button>
+                        </>
+                      ) : (
+                        <div className="text-center">
+                          {isUploadingPhoto && uploadingSlotIndex === i ? (
+                            <span className="text-xs text-primary">Uploading...</span>
+                          ) : i === 0 ? (
+                            <Camera className="w-8 h-8 text-primary mx-auto" />
+                          ) : (
+                            <Plus className="w-6 h-6 text-muted-foreground mx-auto" />
+                          )}
+                          {i === 0 && (
+                            <span className="text-xs text-primary mt-1 block">Main</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
+                {photoError && (
+                  <p className="text-sm text-destructive">{photoError}</p>
+                )}
               </div>
             )}
 

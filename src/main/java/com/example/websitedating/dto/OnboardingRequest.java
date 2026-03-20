@@ -2,6 +2,7 @@ package com.example.websitedating.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.util.List;
 
@@ -14,6 +15,9 @@ public class OnboardingRequest {
     @Email(message = "Email is invalid")
     @NotBlank(message = "Email is required")
     private String email;
+
+    @Pattern(regexp = "^\\+?[0-9]{8,15}$", message = "Phone number is invalid")
+    private String phone;
 
     @Size(max = 120, message = "First name is too long")
     private String firstName;
@@ -36,6 +40,9 @@ public class OnboardingRequest {
     @Size(max = 255, message = "Location is too long")
     private String location;
 
+    @Size(max = 6, message = "Maximum 6 photos are allowed")
+    private List<@Size(max = 1000, message = "Photo URL is too long") String> photos;
+
     private List<String> interests;
 
     @Size(max = 500, message = "Bio is too long")
@@ -55,6 +62,14 @@ public class OnboardingRequest {
 
     public void setEmail(String email) {
         this.email = email;
+    }
+
+    public String getPhone() {
+        return phone;
+    }
+
+    public void setPhone(String phone) {
+        this.phone = phone;
     }
 
     public String getFirstName() {
@@ -119,6 +134,14 @@ public class OnboardingRequest {
 
     public void setInterests(List<String> interests) {
         this.interests = interests;
+    }
+
+    public List<String> getPhotos() {
+        return photos;
+    }
+
+    public void setPhotos(List<String> photos) {
+        this.photos = photos;
     }
 
     public String getBio() {
