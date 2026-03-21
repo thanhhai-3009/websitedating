@@ -5,7 +5,7 @@ import SockJS from "sockjs-client/dist/sockjs";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 const SIGNALING_TYPES = new Set(["OFFER", "ANSWER", "ICE_CANDIDATE", "LEAVE"]);
-const RTC_CONFIG = {
+const DEFAULT_RTC_CONFIG = {
   iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
 };
 
@@ -21,22 +21,61 @@ function parseSignalData(rawData) {
   return rawData;
 }
 
-export function useWebRTC(roomId) {
+export function useWebRTC(roomId, senderId) {
   const { getToken, userId } = useAuth();
+  const signalingSenderId = senderId || userId;
+
   const [isSignalingConnected, setIsSignalingConnected] = useState(false);
   const [callError, setCallError] = useState(null);
   const [isInCall, setIsInCall] = useState(false);
   const [callMode, setCallMode] = useState("video");
+  const [incomingCall, setIncomingCall] = useState(null);
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
 
   const stompRef = useRef(null);
   const peerConnectionRef = useRef(null);
+  const pendingOfferRef = useRef(null);
+  const pendingCallerRef = useRef(null);
+  const pendingIceCandidatesRef = useRef([]);
+  const rtcConfigRef = useRef(DEFAULT_RTC_CONFIG);
 
   const topic = useMemo(() => {
     if (!roomId) return null;
     return `/topic/room/${roomId}`;
   }, [roomId]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadIceServers = async () => {
+      try {
+        const token = await getToken();
+        const response = await fetch(`${API_BASE_URL}/api/webrtc/ice-servers`, {
+          headers: token
+            ? {
+                Authorization: `Bearer ${token}`,
+              }
+            : {},
+        });
+        if (!response.ok) {
+          return;
+        }
+        const payload = await response.json();
+        const servers = Array.isArray(payload?.iceServers) ? payload.iceServers : [];
+        if (!isMounted || servers.length === 0) {
+          return;
+        }
+        rtcConfigRef.current = { iceServers: servers };
+      } catch {
+        rtcConfigRef.current = DEFAULT_RTC_CONFIG;
+      }
+    };
+
+    loadIceServers();
+    return () => {
+      isMounted = false;
+    };
+  }, [getToken]);
 
   const sendSignal = useCallback(
     (type, data, targetId = null) => {
@@ -50,7 +89,7 @@ export function useWebRTC(roomId) {
         destination: "/app/webrtc.signal",
         body: JSON.stringify({
           roomId,
-          senderId: userId,
+          senderId: signalingSenderId,
           targetId,
           type,
           data,
@@ -58,7 +97,7 @@ export function useWebRTC(roomId) {
       });
       return true;
     },
-    [roomId, userId]
+    [roomId, signalingSenderId]
   );
 
   const cleanupPeerConnection = useCallback(() => {
@@ -69,7 +108,9 @@ export function useWebRTC(roomId) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
-
+    pendingIceCandidatesRef.current = [];
+    pendingOfferRef.current = null;
+    pendingCallerRef.current = null;
     setRemoteStream(null);
   }, []);
 
@@ -88,7 +129,7 @@ export function useWebRTC(roomId) {
         return peerConnectionRef.current;
       }
 
-      const peerConnection = new RTCPeerConnection(RTC_CONFIG);
+      const peerConnection = new RTCPeerConnection(rtcConfigRef.current || DEFAULT_RTC_CONFIG);
 
       peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
@@ -101,7 +142,6 @@ export function useWebRTC(roomId) {
           setRemoteStream(event.streams[0]);
           return;
         }
-
         const fallbackStream = new MediaStream([event.track]);
         setRemoteStream(fallbackStream);
       };
@@ -111,6 +151,7 @@ export function useWebRTC(roomId) {
         if (state === "failed" || state === "disconnected" || state === "closed") {
           cleanupPeerConnection();
           stopLocalMedia();
+          setIncomingCall(null);
           setIsInCall(false);
         }
       };
@@ -136,6 +177,14 @@ export function useWebRTC(roomId) {
     });
   }, []);
 
+  const flushPendingIceCandidates = useCallback(async (peerConnection) => {
+    const pendingCandidates = [...pendingIceCandidatesRef.current];
+    pendingIceCandidatesRef.current = [];
+    for (const candidate of pendingCandidates) {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+  }, []);
+
   const startCall = useCallback(
     async (mode = "video", targetId = null) => {
       if (!roomId) {
@@ -145,14 +194,13 @@ export function useWebRTC(roomId) {
 
       try {
         setCallError(null);
+        setIncomingCall(null);
         setCallMode(mode);
 
-        const mediaConstraints = {
+        const stream = await navigator.mediaDevices.getUserMedia({
           audio: true,
           video: mode === "video",
-        };
-
-        const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+        });
         setLocalStream(stream);
 
         const peerConnection = ensurePeerConnection(targetId);
@@ -178,10 +226,55 @@ export function useWebRTC(roomId) {
     [attachStreamToPeer, ensurePeerConnection, roomId, sendSignal]
   );
 
+  const acceptIncomingCall = useCallback(async () => {
+    try {
+      const pendingOffer = pendingOfferRef.current;
+      const callerId = pendingCallerRef.current;
+      if (!pendingOffer || !callerId) {
+        return;
+      }
+
+      setCallError(null);
+      setIncomingCall(null);
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: callMode === "video",
+      });
+      setLocalStream(stream);
+
+      const peerConnection = ensurePeerConnection(callerId);
+      attachStreamToPeer(peerConnection, stream);
+
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(pendingOffer));
+      await flushPendingIceCandidates(peerConnection);
+
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+
+      sendSignal("ANSWER", JSON.stringify(answer), callerId);
+      setIsInCall(true);
+    } catch (error) {
+      setCallError(error?.message || "Could not accept call.");
+    }
+  }, [attachStreamToPeer, callMode, ensurePeerConnection, flushPendingIceCandidates, sendSignal]);
+
+  const rejectIncomingCall = useCallback(() => {
+    const callerId = pendingCallerRef.current;
+    if (callerId) {
+      sendSignal("LEAVE", JSON.stringify({ reason: "rejected" }), callerId);
+    }
+    setIncomingCall(null);
+    pendingOfferRef.current = null;
+    pendingCallerRef.current = null;
+    pendingIceCandidatesRef.current = [];
+  }, [sendSignal]);
+
   const endCall = useCallback(() => {
     sendSignal("LEAVE", "{}");
     cleanupPeerConnection();
     stopLocalMedia();
+    setIncomingCall(null);
     setIsInCall(false);
     setCallError(null);
   }, [cleanupPeerConnection, sendSignal, stopLocalMedia]);
@@ -215,13 +308,17 @@ export function useWebRTC(roomId) {
             if (!payload?.type || !SIGNALING_TYPES.has(payload.type)) {
               return;
             }
-            if (payload.senderId && payload.senderId === userId) {
+            if (payload.targetId && payload.targetId !== signalingSenderId) {
+              return;
+            }
+            if (payload.senderId && payload.senderId === signalingSenderId) {
               return;
             }
 
             if (payload.type === "LEAVE") {
               cleanupPeerConnection();
               stopLocalMedia();
+              setIncomingCall(null);
               setIsInCall(false);
               return;
             }
@@ -230,41 +327,41 @@ export function useWebRTC(roomId) {
               const parsed = parseSignalData(payload.data);
               const offer = parsed?.sdp || parsed;
               const incomingMode = parsed?.mode === "audio" ? "audio" : "video";
+              if (!offer) {
+                return;
+              }
+
               setCallMode(incomingMode);
-
-              const mediaConstraints = {
-                audio: true,
-                video: incomingMode === "video",
-              };
-
-              const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-              setLocalStream(stream);
-
-              const peerConnection = ensurePeerConnection(payload.senderId || null);
-              attachStreamToPeer(peerConnection, stream);
-
-              await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-              const answer = await peerConnection.createAnswer();
-              await peerConnection.setLocalDescription(answer);
-
-              sendSignal("ANSWER", JSON.stringify(answer), payload.senderId || null);
-              setIsInCall(true);
+              pendingOfferRef.current = offer;
+              pendingCallerRef.current = payload.senderId || null;
+              pendingIceCandidatesRef.current = [];
+              setIncomingCall({
+                fromId: payload.senderId || "Unknown",
+                mode: incomingMode,
+              });
               return;
             }
 
             if (payload.type === "ANSWER") {
               const parsed = parseSignalData(payload.data);
               const answer = parsed?.sdp || parsed;
-              if (peerConnectionRef.current) {
+              if (peerConnectionRef.current && answer) {
                 await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+                await flushPendingIceCandidates(peerConnectionRef.current);
               }
               return;
             }
 
             if (payload.type === "ICE_CANDIDATE") {
               const candidate = parseSignalData(payload.data);
-              if (peerConnectionRef.current && candidate) {
+              if (!candidate) {
+                return;
+              }
+
+              if (peerConnectionRef.current?.remoteDescription) {
                 await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+              } else {
+                pendingIceCandidatesRef.current.push(candidate);
               }
             }
           } catch (error) {
@@ -295,20 +392,24 @@ export function useWebRTC(roomId) {
       }
       cleanupPeerConnection();
       stopLocalMedia();
+      setIncomingCall(null);
       setIsSignalingConnected(false);
       setIsInCall(false);
     };
-  }, [attachStreamToPeer, cleanupPeerConnection, ensurePeerConnection, getToken, sendSignal, stopLocalMedia, topic, userId]);
+  }, [cleanupPeerConnection, flushPendingIceCandidates, getToken, signalingSenderId, stopLocalMedia, topic]);
 
   return {
     isSignalingConnected,
     isInCall,
     callMode,
     callError,
+    incomingCall,
     localStream,
     remoteStream,
     startAudioCall: (targetId = null) => startCall("audio", targetId),
     startVideoCall: (targetId = null) => startCall("video", targetId),
+    acceptIncomingCall,
+    rejectIncomingCall,
     endCall,
   };
 }

@@ -40,9 +40,11 @@ public class SecurityConfig {
                                 "/api/auth/login",
                                 "/api/users/onboarding",
                                 "/api/users/profile/**",
+                                "/api/users/resolve/**",
                                 "/api/uploads/photos",
                                 "/api/files/upload",
                                 "/api/discovery/**",
+                                "/api/chats/**",
                                 "/ws/**",
                                 "/uploads/**",
                                 "/error")

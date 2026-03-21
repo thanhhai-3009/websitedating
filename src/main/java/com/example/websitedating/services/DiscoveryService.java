@@ -146,11 +146,21 @@ public class DiscoveryService {
                     if (candidate == null) {
                         return null;
                     }
-                    return MatchResponse.from(candidate, entry.getValue());
+                    return MatchResponse.from(candidate, entry.getValue(), buildDirectRoomId(me.getId(), candidate.getId()));
                 })
                 .filter(value -> value != null)
                 .limit(effectiveLimit)
                 .toList();
+    }
+
+    private String buildDirectRoomId(String firstUserId, String secondUserId) {
+        if (firstUserId == null || secondUserId == null) {
+            return null;
+        }
+        if (firstUserId.compareTo(secondUserId) <= 0) {
+            return "dm-" + firstUserId + "-" + secondUserId;
+        }
+        return "dm-" + secondUserId + "-" + firstUserId;
     }
 
     public void recordInteraction(RecordInteractionRequest request) {
@@ -229,7 +239,7 @@ public class DiscoveryService {
 
     private void saveConnection(String senderId, String receiverId, InteractionType interactionType) {
         InteractionType effectiveInteraction = interactionType == null ? InteractionType.like : interactionType;
-        ConnectionStatus desiredStatus = ConnectionStatus.pending;
+        ConnectionStatus desiredStatus = ConnectionStatus.matched;
 
         List<Connection> existing = connectionRepository.findBySenderIdInAndReceiverIdIn(
                 Arrays.asList(senderId, receiverId),

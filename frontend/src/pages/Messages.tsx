@@ -24,7 +24,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { useChat } from "@/hooks/useChat";
 import { useWebRTC } from "@/hooks/useWebRTC";
@@ -38,11 +37,13 @@ interface MatchApiResponse {
   avatarUrl?: string;
   online?: boolean;
   matchedAt?: string;
+  roomId?: string;
 }
 
 interface ConversationItem {
   id: string;
   userId: string;
+  roomId?: string;
   user: {
     name: string;
     age?: number;
@@ -53,9 +54,9 @@ interface ConversationItem {
   timestamp: string;
 }
 
-interface AuthMeResponse {
+interface ResolvedUserResponse {
   id: string;
-  clerkId?: string;
+  clerkId: string;
 }
 
 const emojiList = ["😀", "😂", "😍", "🥰", "😎", "😅", "😘", "🥳", "❤️", "🔥", "🌹", "✨"];
@@ -98,20 +99,14 @@ const toAbsoluteMediaUrl = (url?: string) => {
   return `${API_BASE_URL}/${url}`;
 };
 
-const createDirectRoomId = (myUserId: string | null, otherUserId: string | undefined) => {
-  if (!myUserId || !otherUserId) return null;
-  const sorted = [myUserId, otherUserId].sort();
-  return `dm-${sorted[0]}-${sorted[1]}`;
-};
-
 export default function Messages() {
   const location = useLocation();
   const preselectedConversationId = (location.state as { selectedConversationId?: string } | null)?.selectedConversationId;
-  const { userId: clerkId, userId, getToken } = useAuth();
-  const [backendUserId, setBackendUserId] = useState<string | null>(null);
+  const { userId: clerkId, userId } = useAuth();
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [draftMessage, setDraftMessage] = useState("");
+  const [selfDbUserId, setSelfDbUserId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [isLoadingConversations, setIsLoadingConversations] = useState(false);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
@@ -119,6 +114,8 @@ export default function Messages() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localAudioRef = useRef<HTMLAudioElement | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -132,29 +129,16 @@ export default function Messages() {
       setConversationsError(null);
 
       try {
-        const token = await getToken();
-        if (!token) {
-          throw new Error("Missing Clerk token");
-        }
-
-        const headers = {
-          Authorization: `Bearer ${token}`,
-        };
-
-        const meResponse = await axios.get<AuthMeResponse>(`${API_BASE_URL}/api/auth/me`, { headers });
-        const myId = meResponse.data?.id;
-
-        const matchesResponse = await axios.get<MatchApiResponse[]>(`${API_BASE_URL}/api/discovery/matches`, {
-          params: { clerkId },
-          headers,
-        });
+         const matchesResponse = await axios.get<MatchApiResponse[]>(`${API_BASE_URL}/api/discovery/matches`, {
+           params: { clerkId },
+         });
 
         if (!isMounted) return;
 
-        setBackendUserId(myId || null);
         const mappedConversations = (matchesResponse.data || []).map((match) => ({
           id: match.userId,
           userId: match.userId,
+          roomId: match.roomId,
           user: {
             name: match.displayName || "Match",
             age: match.age,
@@ -192,13 +176,43 @@ export default function Messages() {
     return () => {
       isMounted = false;
     };
-  }, [clerkId, getToken, preselectedConversationId, selectedConversation]);
+  }, [clerkId, preselectedConversationId, selectedConversation]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const resolveUser = async () => {
+      if (!clerkId) {
+        setSelfDbUserId(null);
+        return;
+      }
+      try {
+        const response = await axios.get<ResolvedUserResponse>(`${API_BASE_URL}/api/users/resolve/${encodeURIComponent(clerkId)}`);
+        if (!isMounted) return;
+        setSelfDbUserId(response.data?.id || null);
+      } catch {
+        if (!isMounted) return;
+        setSelfDbUserId(null);
+      }
+    };
+    resolveUser();
+    return () => {
+      isMounted = false;
+    };
+  }, [clerkId]);
 
   const selectedChat = conversations.find((c) => c.id === selectedConversation);
-  const roomId = useMemo(
-    () => createDirectRoomId(backendUserId, selectedChat?.userId),
-    [backendUserId, selectedChat?.userId]
-  );
+  const roomId = selectedChat?.roomId || null;
+  const roomDerivedDbUserId = useMemo(() => {
+    if (!roomId || !selectedChat?.userId || !roomId.startsWith("dm-")) {
+      return null;
+    }
+    const ids = roomId.substring(3).split("-");
+    if (ids.length < 2) {
+      return null;
+    }
+    return ids[0] === selectedChat.userId ? ids[1] : ids[0];
+  }, [roomId, selectedChat?.userId]);
+  const currentDbUserId = selfDbUserId || roomDerivedDbUserId;
 
   const {
     messages: liveMessages,
@@ -206,35 +220,47 @@ export default function Messages() {
     error,
     sendTextMessage,
     sendImageMessage,
-  } = useChat(roomId, backendUserId);
+  } = useChat(roomId, currentDbUserId);
 
   const {
     isInCall,
     callMode,
     callError,
+    incomingCall,
     localStream,
     remoteStream,
     startAudioCall,
     startVideoCall,
+    acceptIncomingCall,
+    rejectIncomingCall,
     endCall,
-  } = useWebRTC(roomId);
+  } = useWebRTC(roomId, currentDbUserId);
 
   useEffect(() => {
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = localStream || null;
+      localVideoRef.current.play().catch(() => {});
+    }
+    if (localAudioRef.current) {
+      localAudioRef.current.srcObject = localStream || null;
     }
   }, [localStream]);
 
   useEffect(() => {
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = remoteStream || null;
+      remoteVideoRef.current.play().catch(() => {});
+    }
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = remoteStream || null;
+      remoteAudioRef.current.play().catch(() => {});
     }
   }, [remoteStream]);
 
   const mappedLiveMessages = useMemo(() => {
     return (liveMessages || []).map((msg: any, index: number) => {
       const isImage = msg?.type === "IMAGE";
-      const mine = msg?.senderId ? msg.senderId === backendUserId || msg.senderId === userId : false;
+      const mine = msg?.senderId ? msg.senderId === currentDbUserId || msg.senderId === userId : false;
       return {
         id: msg?.id || `${msg?.timestamp || "msg"}-${index}`,
         message: isImage ? "" : msg?.content || "",
@@ -244,7 +270,7 @@ export default function Messages() {
         status: mine ? ("sent" as const) : undefined,
       };
     });
-  }, [backendUserId, liveMessages, userId]);
+  }, [currentDbUserId, liveMessages, userId]);
 
   const handleSendMessage = async (message: string) => {
     if (!message.trim()) return;
@@ -421,34 +447,11 @@ export default function Messages() {
                 )}
               </div>
 
-              <div className="px-4 pb-2">
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="text-xs">
-                      Emoji
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-64 p-3">
-                    <div className="grid grid-cols-6 gap-2">
-                      {emojiList.map((emoji) => (
-                        <button
-                          key={emoji}
-                          type="button"
-                          className="text-xl hover:bg-secondary rounded p-1"
-                          onClick={() => appendEmoji(emoji)}
-                        >
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
-
               <ChatInput
                 onSend={handleSendMessage}
                 onImageClick={handleImageClick}
-                onEmojiClick={() => appendEmoji("😊")}
+                onEmojiSelect={appendEmoji}
+                emojiOptions={emojiList}
                 onVideoCall={() => startVideoCall(selectedChat.userId)}
                 value={draftMessage}
                 onChange={setDraftMessage}
@@ -479,8 +482,9 @@ export default function Messages() {
                       ) : (
                         <div className="w-full min-h-48 rounded-md bg-black/80 flex items-center justify-center text-white text-sm">
                           Audio only
-                        </div>
+                         </div>
                       )}
+                      <audio ref={localAudioRef} autoPlay muted className="hidden" />
                     </div>
                     <div className="rounded-lg bg-secondary/60 p-2">
                       <p className="text-xs text-muted-foreground mb-2">{selectedChat.user.name}</p>
@@ -491,6 +495,7 @@ export default function Messages() {
                           Connecting audio...
                         </div>
                       )}
+                      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
                     </div>
                   </div>
 
@@ -499,6 +504,21 @@ export default function Messages() {
                       <PhoneOff className="w-4 h-4" />
                       End call
                     </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={Boolean(incomingCall) && !isInCall}>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Incoming {incomingCall?.mode === "audio" ? "audio" : "video"} call</DialogTitle>
+                    <DialogDescription>
+                      {selectedChat.user.name} is calling you.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="flex items-center justify-center gap-3">
+                    <Button variant="outline" onClick={rejectIncomingCall}>Reject</Button>
+                    <Button variant="gradient" onClick={acceptIncomingCall}>Accept</Button>
                   </div>
                 </DialogContent>
               </Dialog>

@@ -18,7 +18,11 @@ function toAbsoluteUrl(url) {
   return `${API_BASE_URL}/${url}`;
 }
 
-export function useChat(roomId, senderId = null) {
+function messageKey(value) {
+  return `${value?.id || ""}|${value?.senderId || ""}|${value?.timestamp || ""}|${value?.type || ""}|${value?.content || ""}`;
+}
+
+export function useChat(roomId, senderId) {
   const { getToken } = useAuth();
   const [messages, setMessages] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -31,56 +35,31 @@ export function useChat(roomId, senderId = null) {
   }, [roomId]);
 
   useEffect(() => {
-    let isMounted = true;
-
-    const loadHistory = async () => {
-      if (!roomId) {
-        setMessages([]);
-        return;
-      }
-
-      try {
-        const token = await getToken();
-        if (!token) {
-          throw new Error("Missing auth token");
-        }
-
-        const response = await axios.get(`${API_BASE_URL}/api/chats/${roomId}/messages`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (!isMounted) {
-          return;
-        }
-
-        setMessages(Array.isArray(response.data) ? response.data : []);
-        setError(null);
-      } catch (historyError) {
-        if (!isMounted) {
-          return;
-        }
-        const message = historyError?.response?.data?.message || historyError?.message || "Cannot load message history.";
-        setMessages([]);
-        setError(message);
-      }
-    };
-
-    loadHistory();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [getToken, roomId]);
-
-  useEffect(() => {
+    setMessages([]);
     setError(null);
 
     if (!subscriptionTopic) {
       setIsConnected(false);
       return undefined;
     }
+
+    let isMounted = true;
+
+    const loadHistory = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/api/chats/rooms/${encodeURIComponent(roomId)}/messages`, {
+          params: { limit: 120 },
+        });
+        if (!isMounted) return;
+        const history = Array.isArray(response.data) ? response.data : [];
+        setMessages(history.filter((value) => value?.type && CHAT_TYPES.has(value.type)));
+      } catch {
+        if (!isMounted) return;
+        setMessages([]);
+      }
+    };
+
+    loadHistory();
 
     const client = new Client({
       webSocketFactory: () => new SockJS(`${API_BASE_URL}/ws`),
@@ -108,7 +87,13 @@ export function useChat(roomId, senderId = null) {
             if (incoming.roomId && incoming.roomId !== roomId) {
               return;
             }
-            setMessages((prev) => [...prev, incoming]);
+            setMessages((prev) => {
+              const incomingKey = messageKey(incoming);
+              if (prev.some((item) => messageKey(item) === incomingKey)) {
+                return prev;
+              }
+              return [...prev, incoming];
+            });
           } catch {
             setError("Received invalid message payload.");
           }
@@ -132,6 +117,7 @@ export function useChat(roomId, senderId = null) {
     clientRef.current = client;
 
     return () => {
+      isMounted = false;
       setIsConnected(false);
       if (clientRef.current) {
         clientRef.current.deactivate();
@@ -147,14 +133,10 @@ export function useChat(roomId, senderId = null) {
         setError("Not connected to chat room.");
         return;
       }
-      if (!senderId) {
-        setError("Missing sender profile. Please wait a moment and try again.");
-        return;
-      }
 
       const payload = {
         roomId,
-        senderId,
+        senderId: senderId || undefined,
         content,
         type: "CHAT",
       };
@@ -171,10 +153,6 @@ export function useChat(roomId, senderId = null) {
     async (file) => {
       if (!roomId) {
         setError("Missing roomId.");
-        return;
-      }
-      if (!senderId) {
-        setError("Missing sender profile. Please wait a moment and try again.");
         return;
       }
 
@@ -210,7 +188,7 @@ export function useChat(roomId, senderId = null) {
           destination: "/app/chat.sendMessage",
           body: JSON.stringify({
             roomId,
-            senderId,
+            senderId: senderId || undefined,
             content: imageUrlForMessage,
             type: "IMAGE",
           }),
