@@ -1,6 +1,7 @@
 package com.example.websitedating.services;
 
 import com.example.websitedating.dto.UserResponse;
+import com.example.websitedating.dto.UserProfileResponse;
 import com.example.websitedating.models.User;
 import com.example.websitedating.repository.UserRepository;
 import com.example.websitedating.dto.OnboardingRequest;
@@ -17,6 +18,8 @@ import java.util.stream.Collectors;
 import org.springframework.data.mongodb.core.geo.GeoJsonPoint;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 
 @Service
 public class UserOnboardingService {
@@ -51,6 +54,18 @@ public class UserOnboardingService {
 
         User saved = userRepository.save(user);
         return UserResponse.from(saved);
+    }
+
+    public UserProfileResponse getProfileByClerkId(String clerkId) {
+        String normalizedClerkId = normalizeNullable(clerkId);
+        if (normalizedClerkId == null) {
+            throw new IllegalArgumentException("Clerk ID is required");
+        }
+
+        User user = userRepository.findByClerkId(normalizedClerkId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User profile not found"));
+
+        return UserProfileResponse.from(user);
     }
 
     private User ensureClerkLinked(User user, String clerkId) {
@@ -113,6 +128,19 @@ public class UserOnboardingService {
         String imageUrl = normalizeNullable(request.getImageUrl());
         if (imageUrl != null) {
             profile.setAvatarUrl(imageUrl);
+        }
+
+        if (request.getPhotos() != null && !request.getPhotos().isEmpty()) {
+            List<String> photos = request.getPhotos().stream()
+                    .filter(value -> value != null && !value.isBlank())
+                    .map(String::trim)
+                    .distinct()
+                    .limit(6)
+                    .collect(Collectors.toList());
+            profile.setPhotos(photos);
+            if (!photos.isEmpty() && (profile.getAvatarUrl() == null || profile.getAvatarUrl().isBlank())) {
+                profile.setAvatarUrl(photos.get(0));
+            }
         }
 
         String bio = normalizeNullable(request.getBio());
@@ -224,6 +252,7 @@ public class UserOnboardingService {
         return User.Profile.builder()
                 .avatarUrl("")
                 .bio("")
+            .photos(new ArrayList<>())
                 .personalInfo(User.PersonalInfo.builder().build())
                 .interests(new ArrayList<>())
                 .build();

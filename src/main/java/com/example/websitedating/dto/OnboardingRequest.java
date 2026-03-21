@@ -18,6 +18,9 @@ public class OnboardingRequest {
     @NotBlank(message = "Email is required")
     private String email;
 
+    @Pattern(regexp = "^\\+?[0-9]{8,15}$", message = "Phone number is invalid")
+    private String phone;
+
     @Size(max = 120, message = "First name is too long")
     private String firstName;
 
@@ -68,6 +71,14 @@ public class OnboardingRequest {
 
     public void setEmail(String email) {
         this.email = email;
+    }
+
+    public String getPhone() {
+        return phone;
+    }
+
+    public void setPhone(String phone) {
+        this.phone = phone;
     }
 
     public String getFirstName() {
@@ -148,6 +159,14 @@ public class OnboardingRequest {
 
     public void setInterests(List<String> interests) {
         this.interests = interests;
+    }
+
+    public List<String> getPhotos() {
+        return photos;
+    }
+
+    public void setPhotos(List<String> photos) {
+        this.photos = photos;
     }
 
     public String getBio() {

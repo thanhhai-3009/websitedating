@@ -64,6 +64,8 @@ public class User {
         private String avatarUrl = "";
         @Builder.Default
         private String bio = "";
+        @Builder.Default
+        private List<String> photos = List.of();
         private PersonalInfo personalInfo;
         private List<String> interests;
     }
