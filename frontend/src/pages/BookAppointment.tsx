@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useEffect, useState as useStateHook } from "react";
+import { useLocation } from "react-router-dom";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,7 +44,44 @@ const BookAppointment = () => {
   const [matchUser, setMatchUser] = useState("");
   const [note, setNote] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [suggestions, setSuggestions] = useState<any | null>(null);
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (!matchUser) return;
+    fetch(`/api/appointments/suggestions?matchId=${matchUser}`)
+      .then(res => res.json())
+      .then(data => setSuggestions(data))
+      .catch(() => setSuggestions(null));
+  }, [matchUser]);
+
+  // detect edit mode by query param ?id=...
+  const locationHook = useLocation();
+  const params = new URLSearchParams(locationHook.search);
+  const editId = params.get('id');
+
+  useEffect(() => {
+    if (!editId) return;
+    fetch(`/api/appointments/${editId}`)
+      .then(res => res.json())
+      .then((a: any) => {
+        if (a.scheduledTime) {
+          const dt = new Date(a.scheduledTime);
+          setDate(dt);
+          const hours = dt.getHours();
+          const minutes = dt.getMinutes();
+          const ampm = hours >= 12 ? 'PM' : 'AM';
+          const h = hours % 12 === 0 ? 12 : hours % 12;
+          setTime(`${h}:${minutes.toString().padStart(2,'0')} ${ampm}`);
+        }
+        if (a.location) {
+          const found = spots.find(s => a.location.includes(s.name));
+          if (found) setSpot(String((found as any).id));
+        }
+        setNote(a.note || '');
+        setMatchUser(a.participantId || '');
+      }).catch(() => {});
+  }, [editId]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,8 +89,43 @@ const BookAppointment = () => {
       toast({ title: "Missing fields", description: "Please fill in all required fields.", variant: "destructive" });
       return;
     }
-    setSubmitted(true);
-    toast({ title: "Date booked! 🎉", description: "Your appointment has been scheduled." });
+    // build ISO datetime from selected date + time slot
+    const [hourPart, minutePart, ampm] = time.replace(/\s+/g, '').match(/(\d+):(\d+)(AM|PM)/i)?.slice(1) || [];
+    let hour = Number(hourPart || 0);
+    const minute = Number(minutePart || 0);
+    if ((ampm || '').toUpperCase() === 'PM' && hour < 12) hour += 12;
+    if ((ampm || '').toUpperCase() === 'AM' && hour === 12) hour = 0;
+
+    const scheduled = new Date(date);
+    scheduled.setHours(hour, minute, 0, 0);
+
+    const spotObj = spots.find(s => String(s.id) === spot);
+
+    const payload = {
+      title: `Date with ${spotObj ? spotObj.name : 'your match'}`,
+      participantId: matchUser,
+      scheduledTime: scheduled.toISOString(),
+      location: spotObj ? `${spotObj.name} — ${spotObj.location}` : undefined,
+      note,
+    };
+
+    const method = editId ? 'PUT' : 'POST';
+    const url = editId ? `/api/appointments/${editId}` : '/api/appointments';
+    fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(async res => {
+      if (res.ok) {
+        setSubmitted(true);
+        toast({ title: editId ? 'Appointment updated' : 'Date booked! 🎉', description: editId ? 'Your appointment was updated.' : 'Your appointment has been scheduled.' });
+      } else {
+        const txt = await res.text();
+        toast({ title: 'Failed', description: txt || 'Server error', variant: 'destructive' });
+      }
+    }).catch(() => {
+      toast({ title: 'Network error', description: 'Could not reach server.', variant: 'destructive' });
+    });
   };
 
   if (submitted) {
@@ -208,6 +282,39 @@ const BookAppointment = () => {
                 <p className="text-xs text-muted-foreground mt-1">{note.length}/300</p>
               </CardContent>
             </Card>
+
+            {suggestions && (
+              <Card className="gradient-card">
+                <CardHeader>
+                  <CardTitle className="text-lg font-serif">Suggestions</CardTitle>
+                  <CardDescription>Suggested places, times and estimated cost</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="mb-2">
+                    <div className="font-medium">Places</div>
+                    <div className="flex gap-2 mt-2">
+                      {suggestions.spots?.map((s: any) => (
+                        <Button key={s.id} size="sm" variant={String(spot) === s.id ? 'secondary' : 'outline'} onClick={() => setSpot(String(s.id))}>
+                          {s.name}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mb-2">
+                    <div className="font-medium">Times</div>
+                    <div className="flex gap-2 mt-2">
+                      {suggestions.times?.map((t: string) => (
+                        <Button key={t} size="sm" variant={time === t ? 'secondary' : 'outline'} onClick={() => setTime(t)}>{t}</Button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-medium">Estimated cost</div>
+                    <div className="text-sm text-muted-foreground mt-1">{suggestions.estimatedCost?.min} - {suggestions.estimatedCost?.max} {suggestions.estimatedCost?.currency}</div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <Button type="submit" variant="hero" className="w-full">
               Confirm Date Booking
