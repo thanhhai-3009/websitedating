@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { format } from "date-fns";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useUser } from "@clerk/clerk-react";
 
 interface Appointment {
-  id: number;
+  id: string;
   matchName: string;
   matchInitials: string;
   spot: string;
@@ -34,7 +35,7 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 };
 
 const Appointments = () => {
-  const [cancelId, setCancelId] = useState<number | null>(null);
+  const [cancelId, setCancelId] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const { toast } = useToast();
   const { user } = useUser();
@@ -46,7 +47,24 @@ const Appointments = () => {
       const res = await fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`);
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
-      setAppointments(data);
+      // normalize server shape to UI shape
+      const mapped = (data || []).map((it: any) => {
+        const scheduled = it.scheduledTime ? new Date(it.scheduledTime) : null;
+        const matchName = it.participantId ? String(it.participantId) : "Match";
+        const initials = matchName.split(" ").map((s: string) => s[0]).slice(0,2).join("");
+        return {
+          id: it.id || it._id || "",
+          matchName,
+          matchInitials: initials || "M",
+          spot: it.location?.placeName || "",
+          location: it.location?.address || "",
+          date: scheduled ? format(scheduled, "PPP") : "",
+          time: scheduled ? format(scheduled, "p") : "",
+          status: (it.status || "pending"),
+          note: it.note || it.description || "",
+        } as Appointment;
+      });
+      setAppointments(mapped);
     } catch (err) {
       console.error(err);
     }

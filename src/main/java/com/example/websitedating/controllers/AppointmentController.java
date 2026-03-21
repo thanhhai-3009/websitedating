@@ -30,7 +30,7 @@ public class AppointmentController {
 
     @GetMapping
     public List<Appointment> list(@RequestParam(required = false) String userId) {
-        if (userId == null) return service.findForUser("");
+        if (userId == null) return service.findAll();
         return service.findForUser(userId);
     }
 

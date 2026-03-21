@@ -25,13 +25,7 @@ const matchedUsers = [
   { id: 3, name: "Olivia M.", initials: "OM", age: 28 },
 ];
 
-const spots = [
-  { id: 1, name: "Sunset Rooftop Lounge", location: "Downtown" },
-  { id: 2, name: "The Cozy Bean Café", location: "Midtown" },
-  { id: 3, name: "Bella Italia Trattoria", location: "Little Italy" },
-  { id: 4, name: "Botanical Gardens Walk", location: "Westside Park" },
-  { id: 5, name: "Jazz & Blues Corner", location: "Arts District" },
-];
+// use `spots` imported from lib/dateSpots (includes cost metadata)
 
 const timeSlots = [
   "10:00 AM", "11:00 AM", "12:00 PM", "1:00 PM", "2:00 PM",
@@ -59,6 +53,10 @@ const BookAppointment = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user?.id) {
+      toast({ title: "Not signed in", description: "Please sign in before booking.", variant: 'destructive' });
+      return;
+    }
     if (!date || !time || !spot || !matchUser) {
       toast({ title: "Missing fields", description: "Please fill in all required fields.", variant: "destructive" });
       return;
@@ -76,7 +74,7 @@ const BookAppointment = () => {
     const estimate = selectedSpotObj ? costToEstimate(selectedSpotObj.cost) : { min: 0, max: 0 };
 
     const payload = {
-      creatorId: user?.id || null,
+      creatorId: user.id,
       participantId: matchUser,
       title: "Date Appointment",
       location: { placeName: selectedSpotObj?.name || "", address: selectedSpotObj?.location || "" },

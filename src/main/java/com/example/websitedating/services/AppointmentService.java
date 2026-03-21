@@ -22,6 +22,10 @@ public class AppointmentService {
         return repo.findById(id);
     }
 
+    public List<Appointment> findAll() {
+        return repo.findAll();
+    }
+
     public List<Appointment> findForUser(String userId) {
         return repo.findByCreatorIdOrParticipantId(userId, userId);
     }
