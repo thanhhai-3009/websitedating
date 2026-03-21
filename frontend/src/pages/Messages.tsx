@@ -108,6 +108,8 @@ export default function Messages() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localAudioRef = useRef<HTMLAudioElement | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -195,22 +197,34 @@ export default function Messages() {
     isInCall,
     callMode,
     callError,
+    incomingCall,
     localStream,
     remoteStream,
     startAudioCall,
     startVideoCall,
+    acceptIncomingCall,
+    rejectIncomingCall,
     endCall,
   } = useWebRTC(roomId, currentDbUserId);
 
   useEffect(() => {
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = localStream || null;
+      localVideoRef.current.play().catch(() => {});
+    }
+    if (localAudioRef.current) {
+      localAudioRef.current.srcObject = localStream || null;
     }
   }, [localStream]);
 
   useEffect(() => {
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = remoteStream || null;
+      remoteVideoRef.current.play().catch(() => {});
+    }
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = remoteStream || null;
+      remoteAudioRef.current.play().catch(() => {});
     }
   }, [remoteStream]);
 
@@ -439,8 +453,9 @@ export default function Messages() {
                       ) : (
                         <div className="w-full min-h-48 rounded-md bg-black/80 flex items-center justify-center text-white text-sm">
                           Audio only
-                        </div>
+                         </div>
                       )}
+                      <audio ref={localAudioRef} autoPlay muted className="hidden" />
                     </div>
                     <div className="rounded-lg bg-secondary/60 p-2">
                       <p className="text-xs text-muted-foreground mb-2">{selectedChat.user.name}</p>
@@ -451,6 +466,7 @@ export default function Messages() {
                           Connecting audio...
                         </div>
                       )}
+                      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
                     </div>
                   </div>
 
@@ -459,6 +475,21 @@ export default function Messages() {
                       <PhoneOff className="w-4 h-4" />
                       End call
                     </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={Boolean(incomingCall) && !isInCall}>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Incoming {incomingCall?.mode === "audio" ? "audio" : "video"} call</DialogTitle>
+                    <DialogDescription>
+                      {selectedChat.user.name} is calling you.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="flex items-center justify-center gap-3">
+                    <Button variant="outline" onClick={rejectIncomingCall}>Reject</Button>
+                    <Button variant="gradient" onClick={acceptIncomingCall}>Accept</Button>
                   </div>
                 </DialogContent>
               </Dialog>
