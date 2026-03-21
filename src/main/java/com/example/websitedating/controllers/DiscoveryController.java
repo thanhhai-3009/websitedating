@@ -3,13 +3,13 @@ package com.example.websitedating.controllers;
 import com.example.websitedating.dto.DiscoverUserResponse;
 import com.example.websitedating.dto.MatchResponse;
 import com.example.websitedating.dto.RecordInteractionRequest;
+import com.example.websitedating.dto.AcceptConnectionRequest;
 import com.example.websitedating.services.DiscoveryService;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -55,5 +55,10 @@ public class DiscoveryController {
     public void recordInteraction(@Valid @RequestBody RecordInteractionRequest request) {
         discoveryService.recordInteraction(request);
     }
-}
 
+    @PostMapping("/connections/accept")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void acceptConnection(@Valid @RequestBody AcceptConnectionRequest request) {
+        discoveryService.acceptConnection(request.getClerkId(), request.getTargetUserId());
+    }
+}

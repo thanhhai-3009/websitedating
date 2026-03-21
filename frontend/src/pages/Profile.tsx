@@ -183,10 +183,12 @@ export default function Profile() {
     const nextPhotos = normalizePhotos(data.photos, data.avatarUrl);
     const birthday = data.birthday || "";
     const serverAge = typeof data.age === "number" ? data.age : 0;
+    const normalizedPhone = (data.phone || "").trim();
+    const isPhoneVerified = Boolean(data.phoneVerified) || normalizedPhone.length > 0;
 
     setProfile({
       name: data.name || `${user?.firstName || ""} ${user?.lastName || ""}`.trim(),
-      phone: data.phone || "",
+      phone: normalizedPhone,
       birthday,
       age: serverAge || getAgeFromBirthday(birthday),
       gender: data.gender || "",
@@ -199,21 +201,22 @@ export default function Profile() {
       interests: data.interests || [],
       verified: {
         email: Boolean(data.emailVerified),
-        phone: Boolean(data.phoneVerified),
+        phone: isPhoneVerified,
         profile: Boolean(data.profileVerified),
       },
     });
   };
 
   const hydrateFromClerkFallback = () => {
+    const fallbackPhone = (user?.primaryPhoneNumber?.phoneNumber || "").trim();
     setProfile((prev) => ({
       ...prev,
       name: `${user?.firstName || ""} ${user?.lastName || ""}`.trim(),
-      phone: "",
+      phone: fallbackPhone,
       photos: user?.imageUrl ? [user.imageUrl] : [],
       verified: {
         email: Boolean(user?.primaryEmailAddress?.emailAddress),
-        phone: false,
+        phone: fallbackPhone.length > 0,
         profile: false,
       },
     }));
@@ -373,14 +376,19 @@ export default function Profile() {
         throw new Error(data.message || "Failed to save profile");
       }
 
-      setProfile((prev) => ({
-        ...prev,
-        age: getAgeFromBirthday(prev.birthday),
-        verified: {
-          ...prev.verified,
-          profile: true,
-        },
-      }));
+      setProfile((prev) => {
+        const normalizedPhone = (prev.phone || "").trim();
+        return {
+          ...prev,
+          phone: normalizedPhone,
+          age: getAgeFromBirthday(prev.birthday),
+          verified: {
+            ...prev.verified,
+            phone: normalizedPhone.length > 0,
+            profile: true,
+          },
+        };
+      });
 
       setIsEditing(false);
       toast({ title: "Profile updated", description: "Your profile has been saved." });

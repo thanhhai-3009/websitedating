@@ -146,11 +146,21 @@ public class DiscoveryService {
                     if (candidate == null) {
                         return null;
                     }
-                    return MatchResponse.from(candidate, entry.getValue());
+                    return MatchResponse.from(candidate, entry.getValue(), buildDirectRoomId(me.getId(), candidate.getId()));
                 })
                 .filter(value -> value != null)
                 .limit(effectiveLimit)
                 .toList();
+    }
+
+    private String buildDirectRoomId(String firstUserId, String secondUserId) {
+        if (firstUserId == null || secondUserId == null) {
+            return null;
+        }
+        if (firstUserId.compareTo(secondUserId) <= 0) {
+            return "dm-" + firstUserId + "-" + secondUserId;
+        }
+        return "dm-" + secondUserId + "-" + firstUserId;
     }
 
     public void recordInteraction(RecordInteractionRequest request) {
@@ -190,9 +200,46 @@ public class DiscoveryService {
         }
     }
 
+    public void acceptConnection(String clerkId, String targetUserId) {
+        User me = findByClerkId(clerkId);
+        User target = userRepository.findById(targetUserId)
+                .orElseThrow(() -> new IllegalArgumentException("Target user not found"));
+
+        if (me.getId().equals(target.getId())) {
+            throw new IllegalArgumentException("Cannot accept connection with yourself");
+        }
+
+        List<Connection> existing = connectionRepository.findBySenderIdInAndReceiverIdIn(
+                Arrays.asList(me.getId(), target.getId()),
+                Arrays.asList(me.getId(), target.getId()));
+
+        Connection connection = existing.stream()
+                .filter(value -> value.getSenderId() != null && value.getReceiverId() != null)
+                .filter(value -> !value.getSenderId().equals(value.getReceiverId()))
+                .findFirst()
+                .orElseGet(() -> Connection.builder()
+                        .senderId(target.getId())
+                        .receiverId(me.getId())
+                        .interactionType(InteractionType.match_invite)
+                        .matchedBy(MatchedBy.manual)
+                        .build());
+
+        if (connection.getStatus() != ConnectionStatus.matched) {
+            connection.setStatus(ConnectionStatus.accepted);
+        }
+        if (connection.getInteractionType() == null) {
+            connection.setInteractionType(InteractionType.match_invite);
+        }
+        if (connection.getMatchedBy() == null) {
+            connection.setMatchedBy(MatchedBy.manual);
+        }
+
+        connectionRepository.save(connection);
+    }
+
     private void saveConnection(String senderId, String receiverId, InteractionType interactionType) {
         InteractionType effectiveInteraction = interactionType == null ? InteractionType.like : interactionType;
-        ConnectionStatus desiredStatus = ConnectionStatus.pending;
+        ConnectionStatus desiredStatus = ConnectionStatus.matched;
 
         List<Connection> existing = connectionRepository.findBySenderIdInAndReceiverIdIn(
                 Arrays.asList(senderId, receiverId),
@@ -624,5 +671,4 @@ public class DiscoveryService {
 
     private record ScoredCandidate(User user, Double score, List<ReasonTag> reasonTags) {}
 }
-
 

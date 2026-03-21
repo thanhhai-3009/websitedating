@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
+import java.util.Locale;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -20,10 +21,15 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
+    private final ClerkJwtVerifier clerkJwtVerifier;
     private final UserRepository userRepository;
 
-    public JwtAuthenticationFilter(JwtService jwtService, UserRepository userRepository) {
+    public JwtAuthenticationFilter(
+            JwtService jwtService,
+            ClerkJwtVerifier clerkJwtVerifier,
+            UserRepository userRepository) {
         this.jwtService = jwtService;
+        this.clerkJwtVerifier = clerkJwtVerifier;
         this.userRepository = userRepository;
     }
 
@@ -38,25 +44,70 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String token = authHeader.substring(7);
         try {
-            String email = jwtService.extractSubject(token);
-            if (email == null || SecurityContextHolder.getContext().getAuthentication() != null) {
+            if (SecurityContextHolder.getContext().getAuthentication() != null) {
                 filterChain.doFilter(request, response);
                 return;
             }
 
-            Optional<User> userOpt = userRepository.findByEmailIgnoreCase(email);
-            if (userOpt.isPresent() && jwtService.isTokenValid(token, userOpt.get().getEmail())) {
-                UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                        userOpt.get().getEmail(),
-                        null,
-                        List.of(new SimpleGrantedAuthority("ROLE_USER")));
-                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                SecurityContextHolder.getContext().setAuthentication(authentication);
+            if (tryAuthenticateWithAppJwt(token, request)) {
+                filterChain.doFilter(request, response);
+                return;
             }
+
+            tryAuthenticateWithClerkJwt(token, request);
         } catch (Exception ignored) {
             SecurityContextHolder.clearContext();
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private boolean tryAuthenticateWithAppJwt(String token, HttpServletRequest request) {
+        try {
+            String email = jwtService.extractSubject(token);
+            if (email == null || email.isBlank()) {
+                return false;
+            }
+
+            Optional<User> userOpt = userRepository.findByEmailIgnoreCase(email);
+            if (userOpt.isPresent() && jwtService.isTokenValid(token, userOpt.get().getEmail())) {
+                setAuthentication(userOpt.get().getEmail(), request);
+                return true;
+            }
+        } catch (Exception ignored) {
+            return false;
+        }
+        return false;
+    }
+
+    private void tryAuthenticateWithClerkJwt(String token, HttpServletRequest request) {
+        Optional<ClerkJwtVerifier.ClerkPrincipal> principalOpt = clerkJwtVerifier.verify(token);
+        if (principalOpt.isEmpty()) {
+            return;
+        }
+
+        ClerkJwtVerifier.ClerkPrincipal principal = principalOpt.get();
+
+        Optional<User> userOpt = userRepository.findByClerkId(principal.clerkId());
+        if (userOpt.isEmpty() && principal.email() != null) {
+            userOpt = userRepository.findByEmailIgnoreCase(principal.email().toLowerCase(Locale.ROOT));
+        }
+        if (userOpt.isEmpty()) {
+            return;
+        }
+
+        String principalName = userOpt.get().getClerkId() != null && !userOpt.get().getClerkId().isBlank()
+                ? userOpt.get().getClerkId()
+                : userOpt.get().getEmail();
+        setAuthentication(principalName, request);
+    }
+
+    private void setAuthentication(String principalName, HttpServletRequest request) {
+        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                principalName,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER")));
+        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+        SecurityContextHolder.getContext().setAuthentication(authentication);
     }
 }

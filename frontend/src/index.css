@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -49,18 +49,18 @@
     --success: 150 60% 45%;
     --online: 150 70% 50%;
 
-    /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(0, 70%, 65%) 0%, hsl(340, 70%, 60%) 100%);
+    /* Gradients (Sunset: Pink to Orange) */
+    --gradient-primary: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
     --gradient-gold: linear-gradient(135deg, hsl(40, 90%, 55%) 0%, hsl(35, 85%, 65%) 100%);
     --gradient-hero: linear-gradient(180deg, hsl(30, 30%, 98%) 0%, hsl(0, 60%, 95%) 100%);
     --gradient-card: linear-gradient(180deg, hsl(0, 0%, 100%) 0%, hsl(30, 40%, 98%) 100%);
 
     /* Shadows */
-    --shadow-sm: 0 2px 8px -2px hsl(0 70% 65% / 0.1);
-    --shadow-md: 0 8px 24px -8px hsl(0 70% 65% / 0.15);
-    --shadow-lg: 0 16px 48px -12px hsl(0 70% 65% / 0.2);
+    --shadow-sm: 0 2px 8px -2px rgba(255, 65, 108, 0.1);
+    --shadow-md: 0 8px 24px -8px rgba(255, 65, 108, 0.15);
+    --shadow-lg: 0 16px 48px -12px rgba(255, 65, 108, 0.2);
     --shadow-card: 0 4px 20px -4px hsl(20 20% 15% / 0.08);
-    --shadow-glow: 0 0 40px hsl(0 70% 65% / 0.3);
+    --shadow-glow: 0 0 30px rgba(255, 75, 43, 0.5), 0 0 60px rgba(255, 65, 108, 0.3);
 
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
@@ -112,7 +112,7 @@
     --success: 150 60% 45%;
     --online: 150 70% 50%;
 
-    --gradient-primary: linear-gradient(135deg, hsl(0, 70%, 55%) 0%, hsl(340, 70%, 50%) 100%);
+    --gradient-primary: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
     --gradient-gold: linear-gradient(135deg, hsl(40, 90%, 50%) 0%, hsl(35, 85%, 55%) 100%);
     --gradient-hero: linear-gradient(180deg, hsl(20, 15%, 8%) 0%, hsl(20, 20%, 12%) 100%);
     --gradient-card: linear-gradient(180deg, hsl(20, 15%, 12%) 0%, hsl(20, 15%, 14%) 100%);
@@ -135,11 +135,11 @@
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    font-family: 'Inter', sans-serif;
+    font-family: 'Outfit', sans-serif;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Playfair Display', serif;
+    font-family: 'Outfit', sans-serif;
   }
 }
 
@@ -173,5 +173,37 @@
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+  }
+
+  .blob-shape {
+    border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%;
+    animation: blob-animate 8s ease-in-out infinite alternate;
+  }
+
+  .blob-shape-2 {
+    border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+    animation: blob-animate-2 8s ease-in-out infinite alternate;
+  }
+
+  .heart-frame {
+    clip-path: path('M 500 150 C 400 0, 0 100, 0 450 C 0 800, 500 1000, 500 1000 C 500 1000, 1000 800, 1000 450 C 1000 100, 600 0, 500 150 Z');
+  }
+
+  @keyframes blob-animate {
+    0% {
+      border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%;
+    }
+    100% {
+      border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+    }
+  }
+
+  @keyframes blob-animate-2 {
+    0% {
+      border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+    }
+    100% {
+      border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%;
+    }
   }
 }

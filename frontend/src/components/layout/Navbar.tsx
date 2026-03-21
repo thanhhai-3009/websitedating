@@ -27,15 +27,15 @@ export const Navbar = ({ isAuthenticated = false }: NavbarProps) => {
     : [];
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-lg border-b border-border">
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-gray-100/50">
       <div className="container mx-auto px-4">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between h-20">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center shadow-md">
-              <Heart className="w-5 h-5 text-primary-foreground" />
+          <Link to="/" className="flex items-center gap-3 group">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center gradient-primary text-white font-bold text-xl shadow-md transform -rotate-6 group-hover:rotate-0 transition-all duration-300">
+              <Heart className="w-6 h-6 text-white fill-current" />
             </div>
-            <span className="font-serif text-xl font-semibold text-foreground">Heartly</span>
+            <span className="text-2xl font-bold tracking-tight text-foreground">Heartly</span>
           </Link>
 
           {/* Desktop Navigation */}
@@ -48,14 +48,14 @@ export const Navbar = ({ isAuthenticated = false }: NavbarProps) => {
                     <Button
                       variant="ghost"
                       className={cn(
-                        "relative",
-                        isActive && "bg-coral-light text-coral-dark"
+                        "relative rounded-full font-bold transition-all px-4",
+                        isActive ? "bg-red-50 text-[#ff416c]" : "hover:bg-gray-50 text-muted-foreground"
                       )}
                     >
-                      <link.icon className="w-5 h-5" />
+                      <link.icon className="w-5 h-5 mr-2" />
                       <span className="hidden lg:inline">{link.label}</span>
                       {link.badge && (
-                        <Badge className="absolute -top-1 -right-1 h-5 w-5 p-0 flex items-center justify-center gradient-primary text-[10px] border-0">
+                        <Badge className="absolute -top-1 -right-1 h-5 w-5 p-0 flex items-center justify-center gradient-primary text-[10px] border-0 text-white font-bold">
                           {link.badge}
                         </Badge>
                       )}
@@ -68,12 +68,16 @@ export const Navbar = ({ isAuthenticated = false }: NavbarProps) => {
 
           {/* Auth Buttons */}
           {!isAuthenticated && (
-            <div className="hidden md:flex items-center gap-3">
+            <div className="hidden md:flex items-center gap-4">
               <Link to="/login">
-                <Button variant="ghost">Log in</Button>
+                <Button variant="ghost" className="font-bold text-base hover:bg-gray-50 rounded-full px-6 transition-all">
+                  Log in
+                </Button>
               </Link>
               <Link to="/register">
-                <Button variant="gradient">Get Started</Button>
+                <Button className="gradient-primary text-white hover:scale-105 transition-all duration-300 font-bold rounded-full px-8 shadow-glow border-0">
+                  Get Started
+                </Button>
               </Link>
             </div>
           )}
@@ -124,12 +128,12 @@ export const Navbar = ({ isAuthenticated = false }: NavbarProps) => {
               ) : (
                 <>
                   <Link to="/login" onClick={() => setIsOpen(false)}>
-                    <Button variant="ghost" className="w-full">
+                    <Button variant="ghost" className="w-full justify-start rounded-full font-bold">
                       Log in
                     </Button>
                   </Link>
                   <Link to="/register" onClick={() => setIsOpen(false)}>
-                    <Button variant="gradient" className="w-full">
+                    <Button className="w-full justify-center gradient-primary text-white font-bold shadow-glow border-0 rounded-full mt-2">
                       Get Started
                     </Button>
                   </Link>

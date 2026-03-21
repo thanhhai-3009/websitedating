@@ -118,8 +118,10 @@ export default function Matches() {
     };
   }, [user?.id]);
 
-  const handleMessage = () => {
-    navigate("/messages");
+  const handleMessageForUser = (targetUserId: string) => {
+    navigate("/messages", {
+      state: { selectedConversationId: targetUserId },
+    });
   };
 
   const newMatches = useMemo(() => matches.filter((m) => m.isNew), [matches]);
@@ -177,7 +179,7 @@ export default function Matches() {
                         <MatchCard
                           user={match}
                           isNew
-                          onMessage={handleMessage}
+                          onMessage={handleMessageForUser}
                         />
                       </motion.div>
                     ))}
@@ -201,7 +203,7 @@ export default function Matches() {
                       >
                         <MatchCard
                           user={match}
-                          onMessage={handleMessage}
+                          onMessage={handleMessageForUser}
                         />
                       </motion.div>
                     ))}
