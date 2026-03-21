@@ -6,10 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { CalendarDays, Clock, MapPin, MessageCircle, Star, Trash2, Edit, Plus } from "lucide-react";
+import { CalendarDays, Clock, MapPin, MessageCircle, Star, Trash2, Edit, Plus, Bell } from "lucide-react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { useReviewedAppointments } from "@/hooks/useReviewedAppointments";
 
 interface Appointment {
   id: number;
@@ -40,9 +41,11 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 const Appointments = () => {
   const [cancelId, setCancelId] = useState<number | null>(null);
   const { toast } = useToast();
+  const { isReviewed } = useReviewedAppointments();
 
   const upcoming = appointments.filter(a => a.status === "confirmed" || a.status === "pending");
   const past = appointments.filter(a => a.status === "completed" || a.status === "cancelled");
+  const pendingReviews = appointments.filter(a => a.status === "completed" && !isReviewed(a.id));
 
   const handleCancel = () => {
     toast({ title: "Appointment cancelled", description: "Your date has been cancelled." });
@@ -86,7 +89,7 @@ const Appointments = () => {
                   </Button>
                 </div>
               )}
-              {apt.status === "completed" && (
+              {apt.status === "completed" && !isReviewed(apt.id) && (
                 <div className="mt-3">
                   <Button size="sm" variant="soft" className="gap-1" asChild>
                     <Link to={`/review/${apt.id}`}><Star className="w-3.5 h-3.5" />Leave Review</Link>
@@ -104,6 +107,24 @@ const Appointments = () => {
     <Layout isAuthenticated>
       <div className="container mx-auto px-4 py-8 max-w-3xl">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+          {/* ── Trigger: Review reminder banner ── */}
+          {pendingReviews.map(apt => (
+            <motion.div
+              key={apt.id}
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3"
+            >
+              <Bell className="w-4 h-4 text-primary shrink-0" />
+              <p className="flex-1 text-sm text-foreground">
+                Cuộc hẹn với <span className="font-semibold">{apt.matchName}</span> đã kết thúc. Hãy để lại đánh giá!
+              </p>
+              <Button size="sm" variant="gradient" asChild>
+                <Link to={`/review/${apt.id}`}><Star className="w-3.5 h-3.5 mr-1" />Đánh giá</Link>
+              </Button>
+            </motion.div>
+          ))}
+
           <div className="flex items-center justify-between mb-8">
             <div>
               <h1 className="text-3xl md:text-4xl font-serif font-bold text-foreground mb-2">My Appointments</h1>

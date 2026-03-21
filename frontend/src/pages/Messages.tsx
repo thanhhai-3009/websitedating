@@ -8,6 +8,7 @@ import {
   MoreVertical,
   Verified,
   PhoneOff,
+  Star,
 } from "lucide-react";
 import axios from "axios";
 import { useAuth } from "@clerk/clerk-react";
@@ -27,6 +28,13 @@ import {
 import { cn } from "@/lib/utils";
 import { useChat } from "@/hooks/useChat";
 import { useWebRTC } from "@/hooks/useWebRTC";
+import { Link } from "react-router-dom";
+
+// Simulate: completed appointment IDs mapped to match userId
+// Replace with real API data
+const COMPLETED_APPOINTMENT_BY_USER: Record<string, number> = {
+  // "matchUserId": appointmentId
+};
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 
@@ -110,6 +118,7 @@ export default function Messages() {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [isLoadingConversations, setIsLoadingConversations] = useState(false);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
+  const [dismissedChatReviews, setDismissedChatReviews] = useState<string[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -213,6 +222,13 @@ export default function Messages() {
     return ids[0] === selectedChat.userId ? ids[1] : ids[0];
   }, [roomId, selectedChat?.userId]);
   const currentDbUserId = selfDbUserId || roomDerivedDbUserId;
+
+  const pendingChatReviewAptId = selectedChat
+    ? COMPLETED_APPOINTMENT_BY_USER[selectedChat.userId] ?? null
+    : null;
+  const showChatReviewBanner =
+    pendingChatReviewAptId !== null &&
+    !dismissedChatReviews.includes(selectedChat?.userId ?? "");
 
   const {
     messages: liveMessages,
@@ -421,6 +437,23 @@ export default function Messages() {
                   </Button>
                 </div>
               </div>
+
+              {/* ── Trigger: Review banner inside chat window ── */}
+              {showChatReviewBanner && (
+                <div className="flex items-center gap-3 px-4 py-2.5 bg-primary/5 border-b border-primary/20">
+                  <Star className="w-4 h-4 text-primary shrink-0" />
+                  <p className="flex-1 text-sm text-foreground">
+                    Cuộc hẹn với <span className="font-semibold">{selectedChat!.user.name}</span> đã kết thúc. Chia sẻ trải nghiệm của bạn!
+                  </p>
+                  <Button size="sm" variant="gradient" asChild>
+                    <Link to={`/review/${pendingChatReviewAptId}`}>Đánh giá</Link>
+                  </Button>
+                  <button
+                    onClick={() => setDismissedChatReviews((p) => [...p, selectedChat!.userId])}
+                    className="text-muted-foreground hover:text-foreground text-xs"
+                  >✕</button>
+                </div>
+              )}
 
               <div className="px-4 py-2 text-xs text-muted-foreground border-b border-border">
                 {isConnected ? "Chat connected" : "Connecting chat..."}
