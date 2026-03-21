@@ -229,7 +229,7 @@ public class DiscoveryService {
 
     private void saveConnection(String senderId, String receiverId, InteractionType interactionType) {
         InteractionType effectiveInteraction = interactionType == null ? InteractionType.like : interactionType;
-        ConnectionStatus desiredStatus = ConnectionStatus.pending;
+        ConnectionStatus desiredStatus = ConnectionStatus.matched;
 
         List<Connection> existing = connectionRepository.findBySenderIdInAndReceiverIdIn(
                 Arrays.asList(senderId, receiverId),
