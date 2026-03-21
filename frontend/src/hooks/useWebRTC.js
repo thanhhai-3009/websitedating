@@ -21,8 +21,9 @@ function parseSignalData(rawData) {
   return rawData;
 }
 
-export function useWebRTC(roomId) {
+export function useWebRTC(roomId, senderId) {
   const { getToken, userId } = useAuth();
+  const signalingSenderId = senderId || userId;
   const [isSignalingConnected, setIsSignalingConnected] = useState(false);
   const [callError, setCallError] = useState(null);
   const [isInCall, setIsInCall] = useState(false);
@@ -50,7 +51,7 @@ export function useWebRTC(roomId) {
         destination: "/app/webrtc.signal",
         body: JSON.stringify({
           roomId,
-          senderId: userId,
+          senderId: signalingSenderId,
           targetId,
           type,
           data,
@@ -58,7 +59,7 @@ export function useWebRTC(roomId) {
       });
       return true;
     },
-    [roomId, userId]
+    [roomId, signalingSenderId]
   );
 
   const cleanupPeerConnection = useCallback(() => {
@@ -215,7 +216,7 @@ export function useWebRTC(roomId) {
             if (!payload?.type || !SIGNALING_TYPES.has(payload.type)) {
               return;
             }
-            if (payload.senderId && payload.senderId === userId) {
+            if (payload.senderId && payload.senderId === signalingSenderId) {
               return;
             }
 
@@ -298,7 +299,7 @@ export function useWebRTC(roomId) {
       setIsSignalingConnected(false);
       setIsInCall(false);
     };
-  }, [attachStreamToPeer, cleanupPeerConnection, ensurePeerConnection, getToken, sendSignal, stopLocalMedia, topic, userId]);
+  }, [attachStreamToPeer, cleanupPeerConnection, ensurePeerConnection, getToken, sendSignal, signalingSenderId, stopLocalMedia, topic]);
 
   return {
     isSignalingConnected,

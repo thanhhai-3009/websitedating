@@ -24,7 +24,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { useChat } from "@/hooks/useChat";
 import { useWebRTC } from "@/hooks/useWebRTC";
@@ -173,6 +172,16 @@ export default function Messages() {
 
   const selectedChat = conversations.find((c) => c.id === selectedConversation);
   const roomId = selectedChat?.roomId || null;
+  const currentDbUserId = useMemo(() => {
+    if (!roomId || !selectedChat?.userId || !roomId.startsWith("dm-")) {
+      return null;
+    }
+    const ids = roomId.substring(3).split("-");
+    if (ids.length < 2) {
+      return null;
+    }
+    return ids[0] === selectedChat.userId ? ids[1] : ids[0];
+  }, [roomId, selectedChat?.userId]);
 
   const {
     messages: liveMessages,
@@ -180,7 +189,7 @@ export default function Messages() {
     error,
     sendTextMessage,
     sendImageMessage,
-  } = useChat(roomId);
+  } = useChat(roomId, currentDbUserId);
 
   const {
     isInCall,
@@ -191,7 +200,7 @@ export default function Messages() {
     startAudioCall,
     startVideoCall,
     endCall,
-  } = useWebRTC(roomId);
+  } = useWebRTC(roomId, currentDbUserId);
 
   useEffect(() => {
     if (localVideoRef.current) {
@@ -208,7 +217,7 @@ export default function Messages() {
   const mappedLiveMessages = useMemo(() => {
     return (liveMessages || []).map((msg: any, index: number) => {
       const isImage = msg?.type === "IMAGE";
-      const mine = msg?.senderId ? msg.senderId === userId : false;
+      const mine = msg?.senderId ? msg.senderId === currentDbUserId || msg.senderId === userId : false;
       return {
         id: msg?.id || `${msg?.timestamp || "msg"}-${index}`,
         message: isImage ? "" : msg?.content || "",
@@ -218,7 +227,7 @@ export default function Messages() {
         status: mine ? ("sent" as const) : undefined,
       };
     });
-  }, [liveMessages, userId]);
+  }, [currentDbUserId, liveMessages, userId]);
 
   const handleSendMessage = async (message: string) => {
     if (!message.trim()) return;
@@ -395,34 +404,11 @@ export default function Messages() {
                 )}
               </div>
 
-              <div className="px-4 pb-2">
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="text-xs">
-                      Emoji
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-64 p-3">
-                    <div className="grid grid-cols-6 gap-2">
-                      {emojiList.map((emoji) => (
-                        <button
-                          key={emoji}
-                          type="button"
-                          className="text-xl hover:bg-secondary rounded p-1"
-                          onClick={() => appendEmoji(emoji)}
-                        >
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
-
               <ChatInput
                 onSend={handleSendMessage}
                 onImageClick={handleImageClick}
-                onEmojiClick={() => appendEmoji("😊")}
+                onEmojiSelect={appendEmoji}
+                emojiOptions={emojiList}
                 onVideoCall={() => startVideoCall(selectedChat.userId)}
                 value={draftMessage}
                 onChange={setDraftMessage}

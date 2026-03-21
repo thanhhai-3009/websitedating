@@ -18,7 +18,11 @@ function toAbsoluteUrl(url) {
   return `${API_BASE_URL}/${url}`;
 }
 
-export function useChat(roomId) {
+function messageKey(value) {
+  return `${value?.id || ""}|${value?.senderId || ""}|${value?.timestamp || ""}|${value?.type || ""}|${value?.content || ""}`;
+}
+
+export function useChat(roomId, senderId) {
   const { getToken } = useAuth();
   const [messages, setMessages] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -38,6 +42,24 @@ export function useChat(roomId) {
       setIsConnected(false);
       return undefined;
     }
+
+    let isMounted = true;
+
+    const loadHistory = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/api/chats/rooms/${encodeURIComponent(roomId)}/messages`, {
+          params: { limit: 120 },
+        });
+        if (!isMounted) return;
+        const history = Array.isArray(response.data) ? response.data : [];
+        setMessages(history.filter((value) => value?.type && CHAT_TYPES.has(value.type)));
+      } catch {
+        if (!isMounted) return;
+        setMessages([]);
+      }
+    };
+
+    loadHistory();
 
     const client = new Client({
       webSocketFactory: () => new SockJS(`${API_BASE_URL}/ws`),
@@ -65,7 +87,13 @@ export function useChat(roomId) {
             if (incoming.roomId && incoming.roomId !== roomId) {
               return;
             }
-            setMessages((prev) => [...prev, incoming]);
+            setMessages((prev) => {
+              const incomingKey = messageKey(incoming);
+              if (prev.some((item) => messageKey(item) === incomingKey)) {
+                return prev;
+              }
+              return [...prev, incoming];
+            });
           } catch {
             setError("Received invalid message payload.");
           }
@@ -89,6 +117,7 @@ export function useChat(roomId) {
     clientRef.current = client;
 
     return () => {
+      isMounted = false;
       setIsConnected(false);
       if (clientRef.current) {
         clientRef.current.deactivate();
@@ -107,6 +136,7 @@ export function useChat(roomId) {
 
       const payload = {
         roomId,
+        senderId: senderId || undefined,
         content,
         type: "CHAT",
       };
@@ -116,7 +146,7 @@ export function useChat(roomId) {
         body: JSON.stringify(payload),
       });
     },
-    [roomId]
+    [roomId, senderId]
   );
 
   const sendImageMessage = useCallback(
@@ -158,6 +188,7 @@ export function useChat(roomId) {
           destination: "/app/chat.sendMessage",
           body: JSON.stringify({
             roomId,
+            senderId: senderId || undefined,
             content: imageUrlForMessage,
             type: "IMAGE",
           }),
@@ -169,7 +200,7 @@ export function useChat(roomId) {
         setError(message);
       }
     },
-    [getToken, roomId]
+    [getToken, roomId, senderId]
   );
 
   const clearMessages = useCallback(() => setMessages([]), []);
