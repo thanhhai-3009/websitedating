@@ -41,7 +41,10 @@ public class SecurityConfig {
                                 "/api/users/onboarding",
                                 "/api/users/profile/**",
                                 "/api/uploads/photos",
+                                "/api/files/upload",
                                 "/api/discovery/**",
+                                "/ws/**",
+                                "/uploads/**",
                                 "/error")
                         .permitAll()
                         .anyRequest()
@@ -72,4 +75,3 @@ public class SecurityConfig {
         return source;
     }
 }
-

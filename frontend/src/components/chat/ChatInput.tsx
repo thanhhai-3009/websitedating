@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Send, Image, Smile, Mic, Video } from "lucide-react";
+import { Send, Image, Smile, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -8,6 +8,8 @@ interface ChatInputProps {
   onImageClick?: () => void;
   onEmojiClick?: () => void;
   onVideoCall?: () => void;
+  value?: string;
+  onChange?: (value: string) => void;
 }
 
 export const ChatInput = ({
@@ -15,8 +17,19 @@ export const ChatInput = ({
   onImageClick,
   onEmojiClick,
   onVideoCall,
+  value,
+  onChange,
 }: ChatInputProps) => {
-  const [message, setMessage] = useState("");
+  const [internalMessage, setInternalMessage] = useState("");
+  const isControlled = value !== undefined;
+  const message = isControlled ? value : internalMessage;
+
+  const setMessage = (nextValue: string) => {
+    if (!isControlled) {
+      setInternalMessage(nextValue);
+    }
+    onChange?.(nextValue);
+  };
 
   const handleSend = () => {
     if (message.trim()) {
@@ -40,6 +53,7 @@ export const ChatInput = ({
           size="icon"
           className="text-muted-foreground hover:text-foreground"
           onClick={onImageClick}
+          type="button"
         >
           <Image className="w-5 h-5" />
         </Button>
@@ -48,6 +62,7 @@ export const ChatInput = ({
           size="icon"
           className="text-muted-foreground hover:text-foreground"
           onClick={onEmojiClick}
+          type="button"
         >
           <Smile className="w-5 h-5" />
         </Button>
@@ -55,7 +70,7 @@ export const ChatInput = ({
       <Input
         value={message}
         onChange={(e) => setMessage(e.target.value)}
-        onKeyPress={handleKeyPress}
+        onKeyDown={handleKeyPress}
         placeholder="Type a message..."
         className="flex-1 bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary"
       />
@@ -65,6 +80,7 @@ export const ChatInput = ({
           size="icon"
           className="text-muted-foreground hover:text-primary"
           onClick={onVideoCall}
+          type="button"
         >
           <Video className="w-5 h-5" />
         </Button>
@@ -74,6 +90,7 @@ export const ChatInput = ({
           className="rounded-full"
           onClick={handleSend}
           disabled={!message.trim()}
+          type="button"
         >
           <Send className="w-5 h-5" />
         </Button>
