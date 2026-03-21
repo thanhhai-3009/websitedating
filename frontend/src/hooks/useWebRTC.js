@@ -5,7 +5,7 @@ import SockJS from "sockjs-client/dist/sockjs";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 const SIGNALING_TYPES = new Set(["OFFER", "ANSWER", "ICE_CANDIDATE", "LEAVE"]);
-const RTC_CONFIG = {
+const DEFAULT_RTC_CONFIG = {
   iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
 };
 
@@ -38,11 +38,37 @@ export function useWebRTC(roomId, senderId) {
   const pendingOfferRef = useRef(null);
   const pendingCallerRef = useRef(null);
   const pendingIceCandidatesRef = useRef([]);
+  const rtcConfigRef = useRef(DEFAULT_RTC_CONFIG);
 
   const topic = useMemo(() => {
     if (!roomId) return null;
     return `/topic/room/${roomId}`;
   }, [roomId]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadIceServers = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/webrtc/ice-servers`);
+        if (!response.ok) {
+          return;
+        }
+        const payload = await response.json();
+        const servers = Array.isArray(payload?.iceServers) ? payload.iceServers : [];
+        if (!isMounted || servers.length === 0) {
+          return;
+        }
+        rtcConfigRef.current = { iceServers: servers };
+      } catch {
+        rtcConfigRef.current = DEFAULT_RTC_CONFIG;
+      }
+    };
+
+    loadIceServers();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const sendSignal = useCallback(
     (type, data, targetId = null) => {
@@ -96,7 +122,7 @@ export function useWebRTC(roomId, senderId) {
         return peerConnectionRef.current;
       }
 
-      const peerConnection = new RTCPeerConnection(RTC_CONFIG);
+      const peerConnection = new RTCPeerConnection(rtcConfigRef.current || DEFAULT_RTC_CONFIG);
 
       peerConnection.onicecandidate = (event) => {
         if (event.candidate) {

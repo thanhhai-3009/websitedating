@@ -54,6 +54,11 @@ interface ConversationItem {
   timestamp: string;
 }
 
+interface ResolvedUserResponse {
+  id: string;
+  clerkId: string;
+}
+
 const emojiList = ["😀", "😂", "😍", "🥰", "😎", "😅", "😘", "🥳", "❤️", "🔥", "🌹", "✨"];
 
 const toDisplayTime = (value?: string) => {
@@ -101,6 +106,7 @@ export default function Messages() {
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [draftMessage, setDraftMessage] = useState("");
+  const [selfDbUserId, setSelfDbUserId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [isLoadingConversations, setIsLoadingConversations] = useState(false);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
@@ -172,9 +178,31 @@ export default function Messages() {
     };
   }, [clerkId, preselectedConversationId, selectedConversation]);
 
+  useEffect(() => {
+    let isMounted = true;
+    const resolveUser = async () => {
+      if (!clerkId) {
+        setSelfDbUserId(null);
+        return;
+      }
+      try {
+        const response = await axios.get<ResolvedUserResponse>(`${API_BASE_URL}/api/users/resolve/${encodeURIComponent(clerkId)}`);
+        if (!isMounted) return;
+        setSelfDbUserId(response.data?.id || null);
+      } catch {
+        if (!isMounted) return;
+        setSelfDbUserId(null);
+      }
+    };
+    resolveUser();
+    return () => {
+      isMounted = false;
+    };
+  }, [clerkId]);
+
   const selectedChat = conversations.find((c) => c.id === selectedConversation);
   const roomId = selectedChat?.roomId || null;
-  const currentDbUserId = useMemo(() => {
+  const roomDerivedDbUserId = useMemo(() => {
     if (!roomId || !selectedChat?.userId || !roomId.startsWith("dm-")) {
       return null;
     }
@@ -184,6 +212,7 @@ export default function Messages() {
     }
     return ids[0] === selectedChat.userId ? ids[1] : ids[0];
   }, [roomId, selectedChat?.userId]);
+  const currentDbUserId = selfDbUserId || roomDerivedDbUserId;
 
   const {
     messages: liveMessages,
