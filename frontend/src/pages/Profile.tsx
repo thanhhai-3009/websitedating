@@ -32,6 +32,8 @@ type ProfileState = {
   gender: string;
   lookingFor: string;
   location: string;
+  longitude?: number;
+  latitude?: number;
   bio: string;
   photos: string[];
   interests: string[];
@@ -85,6 +87,8 @@ type ProfileApiResponse = {
   gender?: string;
   lookingFor?: string;
   location?: string;
+  longitude?: number;
+  latitude?: number;
   bio?: string;
   photos?: string[];
   avatarUrl?: string;
@@ -149,10 +153,12 @@ export default function Profile() {
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingPhone, setIsSavingPhone] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isPhoneFormOpen, setIsPhoneFormOpen] = useState(false);
   const [phoneInput, setPhoneInput] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [locationPermissionError, setLocationPermissionError] = useState("");
 
   const selectedSlotRef = useRef(0);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
@@ -186,6 +192,8 @@ export default function Profile() {
       gender: data.gender || "",
       lookingFor: data.lookingFor || "",
       location: data.location || "",
+      longitude: typeof data.longitude === "number" ? data.longitude : undefined,
+      latitude: typeof data.latitude === "number" ? data.latitude : undefined,
       bio: data.bio || "",
       photos: nextPhotos,
       interests: data.interests || [],
@@ -209,6 +217,79 @@ export default function Profile() {
         profile: false,
       },
     }));
+  };
+
+  const reverseGeocodeCoordinates = async (latitude: number, longitude: number) => {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&accept-language=en`
+      );
+      if (!response.ok) {
+        return undefined;
+      }
+
+      const data = (await response.json()) as {
+        display_name?: string;
+        address?: {
+          city?: string;
+          town?: string;
+          village?: string;
+          state?: string;
+          country?: string;
+        };
+      };
+
+      const placeName = [
+        data.address?.city || data.address?.town || data.address?.village || data.address?.state,
+        data.address?.country,
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+      return placeName || data.display_name;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const requestCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationPermissionError("Trinh duyet khong ho tro dinh vi.");
+      return;
+    }
+
+    setIsLocating(true);
+    setLocationPermissionError("");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const longitude = position.coords.longitude;
+        const latitude = position.coords.latitude;
+
+        setProfile((prev) => ({
+          ...prev,
+          longitude,
+          latitude,
+        }));
+
+        void reverseGeocodeCoordinates(latitude, longitude).then((detectedLocation) => {
+          setProfile((prev) => ({
+            ...prev,
+            location:
+              detectedLocation ||
+              (prev.location.trim() ? prev.location : `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`),
+          }));
+        });
+
+        setIsLocating(false);
+      },
+      () => {
+        setLocationPermissionError(
+          "Vui long bat quyen dinh vi tren thiet bi va trinh duyet de tiep tuc."
+        );
+        setIsLocating(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 60000, timeout: 12000 }
+    );
   };
 
   useEffect(() => {
@@ -274,6 +355,8 @@ export default function Profile() {
         gender: profile.gender,
         lookingFor: profile.lookingFor,
         location: profile.location,
+        longitude: profile.longitude,
+        latitude: profile.latitude,
         photos: profile.photos,
         interests: profile.interests,
         bio: profile.bio,
@@ -422,6 +505,8 @@ export default function Profile() {
         gender: profile.gender,
         lookingFor: profile.lookingFor,
         location: profile.location,
+        longitude: profile.longitude,
+        latitude: profile.latitude,
         photos: profile.photos,
         interests: profile.interests,
         bio: profile.bio,
@@ -556,6 +641,25 @@ export default function Profile() {
                       placeholder="City"
                     />
                   </div>
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="text-muted-foreground">
+                      {profile.longitude !== undefined && profile.latitude !== undefined
+                        ? `GPS: ${profile.latitude.toFixed(6)}, ${profile.longitude.toFixed(6)}`
+                        : "Chua co toa do GPS"}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={requestCurrentLocation}
+                      disabled={isLocating}
+                      className="h-8 px-3"
+                    >
+                      {isLocating ? "Locating..." : "Use current location"}
+                    </Button>
+                  </div>
+                  {locationPermissionError && (
+                    <p className="text-xs text-destructive">{locationPermissionError}</p>
+                  )}
                   <Input
                     value={profile.phone}
                     onChange={(event) => setProfile((prev) => ({ ...prev, phone: event.target.value }))}

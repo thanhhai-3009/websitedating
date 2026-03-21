@@ -16,6 +16,8 @@ public class UserProfileResponse {
     private String gender;
     private String lookingFor;
     private String location;
+    private Double longitude;
+    private Double latitude;
     private String bio;
     private String avatarUrl;
     private List<String> photos;
@@ -38,6 +40,12 @@ public class UserProfileResponse {
         response.birthday = personalInfo != null ? personalInfo.getBirthday() : null;
         response.gender = personalInfo != null ? personalInfo.getGender() : null;
         response.location = personalInfo != null ? personalInfo.getLocationText() : null;
+        response.longitude = personalInfo != null && personalInfo.getLocation() != null
+                ? personalInfo.getLocation().getX()
+                : null;
+        response.latitude = personalInfo != null && personalInfo.getLocation() != null
+                ? personalInfo.getLocation().getY()
+                : null;
         response.bio = profile != null ? profile.getBio() : null;
         response.avatarUrl = profile != null ? profile.getAvatarUrl() : null;
         response.photos = profile != null && profile.getPhotos() != null
@@ -111,6 +119,14 @@ public class UserProfileResponse {
 
     public String getLocation() {
         return location;
+    }
+
+    public Double getLongitude() {
+        return longitude;
+    }
+
+    public Double getLatitude() {
+        return latitude;
     }
 
     public String getBio() {

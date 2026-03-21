@@ -39,6 +39,8 @@ public class SecurityConfig {
                                 "/api/auth/register",
                                 "/api/auth/login",
                                 "/api/users/onboarding",
+                                "/api/users/profile/**",
+                                "/api/uploads/photos",
                                 "/api/discovery/**",
                                 "/error")
                         .permitAll()
