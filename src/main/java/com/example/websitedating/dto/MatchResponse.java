@@ -11,8 +11,9 @@ public class MatchResponse {
     private String avatarUrl;
     private boolean online;
     private Instant matchedAt;
+    private String roomId;
 
-    public static MatchResponse from(User user, Instant matchedAt) {
+    public static MatchResponse from(User user, Instant matchedAt, String roomId) {
         MatchResponse response = new MatchResponse();
         response.userId = user.getId();
 
@@ -24,6 +25,7 @@ public class MatchResponse {
         response.avatarUrl = user.getProfile() == null ? "" : (user.getProfile().getAvatarUrl() == null ? "" : user.getProfile().getAvatarUrl());
         response.online = user.getStatus() != null && Boolean.TRUE.equals(user.getStatus().getOnline());
         response.matchedAt = matchedAt;
+        response.roomId = roomId;
         return response;
     }
 
@@ -50,5 +52,8 @@ public class MatchResponse {
     public Instant getMatchedAt() {
         return matchedAt;
     }
-}
 
+    public String getRoomId() {
+        return roomId;
+    }
+}

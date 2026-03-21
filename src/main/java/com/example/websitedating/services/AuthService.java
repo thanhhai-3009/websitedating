@@ -72,8 +72,14 @@ public class AuthService {
         return new AuthResponse(token, UserResponse.from(user));
     }
 
-    public UserResponse getMe(String email) {
-        User user = userRepository.findByEmailIgnoreCase(email)
+    public UserResponse getMe(String principal) {
+        String normalized = normalizeNullable(principal);
+        if (normalized == null) {
+            throw new BadCredentialsException("User not found");
+        }
+
+        User user = userRepository.findByClerkId(normalized)
+                .or(() -> userRepository.findByEmailIgnoreCase(normalized.toLowerCase(Locale.ROOT)))
                 .orElseThrow(() -> new BadCredentialsException("User not found"));
         return UserResponse.from(user);
     }
