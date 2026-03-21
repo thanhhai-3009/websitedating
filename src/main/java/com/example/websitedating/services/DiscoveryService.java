@@ -47,6 +47,7 @@ public class DiscoveryService {
     private final ReportRepository reportRepository;
     private final MatchSuggestionRepository matchSuggestionRepository;
     private final MongoTemplate mongoTemplate;
+    private final NotificationService notificationService;
 
     public DiscoveryService(
             UserRepository userRepository,
@@ -54,13 +55,15 @@ public class DiscoveryService {
             BlockRepository blockRepository,
             ReportRepository reportRepository,
             MatchSuggestionRepository matchSuggestionRepository,
-            MongoTemplate mongoTemplate) {
+            MongoTemplate mongoTemplate,
+            NotificationService notificationService) {
         this.userRepository = userRepository;
         this.connectionRepository = connectionRepository;
         this.blockRepository = blockRepository;
         this.reportRepository = reportRepository;
         this.matchSuggestionRepository = matchSuggestionRepository;
         this.mongoTemplate = mongoTemplate;
+        this.notificationService = notificationService;
     }
 
     public List<DiscoverUserResponse> nearby(String clerkId, Double longitude, Double latitude, Integer radiusKm, Integer limit) {
@@ -205,6 +208,11 @@ public class DiscoveryService {
             if (first.getStatus() != ConnectionStatus.matched && first.getStatus() != ConnectionStatus.accepted) {
                 first.setStatus(desiredStatus);
                 changed = true;
+                
+                if (desiredStatus == ConnectionStatus.matched || desiredStatus == ConnectionStatus.accepted) {
+                    notificationService.createMatchNotification(first.getSenderId(), first.getReceiverId());
+                    notificationService.createMatchNotification(first.getReceiverId(), first.getSenderId());
+                }
             }
             if (effectiveInteraction == InteractionType.match_invite
                     && first.getInteractionType() != InteractionType.match_invite) {
@@ -226,6 +234,11 @@ public class DiscoveryService {
                 .matchedBy(effectiveInteraction == InteractionType.match_invite ? MatchedBy.manual : MatchedBy.behavior)
                 .build();
         connectionRepository.save(connection);
+
+        if (desiredStatus == ConnectionStatus.matched || desiredStatus == ConnectionStatus.accepted) {
+            notificationService.createMatchNotification(senderId, receiverId);
+            notificationService.createMatchNotification(receiverId, senderId);
+        }
     }
 
     private List<User> baseCandidates(User me, int maxCandidates) {
