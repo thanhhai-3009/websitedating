@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { CalendarDays, Clock, MapPin, MessageCircle, Star, Trash2, Edit, Plus } 
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { useUser } from "@clerk/clerk-react";
 
 interface Appointment {
   id: number;
@@ -23,12 +24,7 @@ interface Appointment {
   note?: string;
 }
 
-const appointments: Appointment[] = [
-  { id: 1, matchName: "Emma W.", matchInitials: "EW", spot: "Sunset Rooftop Lounge", location: "Downtown", date: "Mar 20, 2026", time: "7:00 PM", status: "confirmed", note: "Looking forward to it!" },
-  { id: 2, matchName: "Sophie L.", matchInitials: "SL", spot: "The Cozy Bean Café", location: "Midtown", date: "Mar 22, 2026", time: "2:00 PM", status: "pending" },
-  { id: 3, matchName: "Olivia M.", matchInitials: "OM", spot: "Botanical Gardens Walk", location: "Westside Park", date: "Mar 10, 2026", time: "10:00 AM", status: "completed" },
-  { id: 4, matchName: "Isabella R.", matchInitials: "IR", spot: "Bella Italia Trattoria", location: "Little Italy", date: "Mar 5, 2026", time: "8:00 PM", status: "cancelled" },
-];
+// will be fetched from API
 
 const statusConfig: Record<string, { label: string; className: string }> = {
   confirmed: { label: "Confirmed", className: "bg-success/10 text-success border-success/20" },
@@ -39,14 +35,39 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 
 const Appointments = () => {
   const [cancelId, setCancelId] = useState<number | null>(null);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const { toast } = useToast();
+  const { user } = useUser();
+
+  const fetchAppointments = async () => {
+    const clerkId = user?.id;
+    if (!clerkId) return;
+    try {
+      const res = await fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`);
+      if (!res.ok) throw new Error('Failed to fetch');
+      const data = await res.json();
+      setAppointments(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => { fetchAppointments(); }, [user]);
 
   const upcoming = appointments.filter(a => a.status === "confirmed" || a.status === "pending");
   const past = appointments.filter(a => a.status === "completed" || a.status === "cancelled");
 
   const handleCancel = () => {
-    toast({ title: "Appointment cancelled", description: "Your date has been cancelled." });
-    setCancelId(null);
+    if (!cancelId) return;
+    fetch(`/api/appointments/${cancelId}`, { method: 'DELETE' }).then(res => {
+      if (!res.ok) throw new Error('Delete failed');
+      toast({ title: "Appointment cancelled", description: "Your date has been cancelled." });
+      setCancelId(null);
+      fetchAppointments();
+    }).catch(err => {
+      console.error(err);
+      toast({ title: "Error", description: "Could not cancel appointment.", variant: 'destructive' });
+    });
   };
 
   const AppointmentCard = ({ apt, showActions }: { apt: Appointment; showActions: boolean }) => (

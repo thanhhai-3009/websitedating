@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
+import { useUser } from "@clerk/clerk-react";
+import { spots, costToEstimate } from "@/lib/dateSpots";
+import { useLocation } from "react-router-dom";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { CalendarIcon, Clock, MapPin, Heart, ArrowLeft, Check } from "lucide-react";
@@ -43,6 +46,16 @@ const BookAppointment = () => {
   const [note, setNote] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const { toast } = useToast();
+  const { user } = useUser();
+  const location = useLocation();
+
+  // preload spot from query param
+  useEffect(() => {
+    const qp = new URLSearchParams(location.search).get("spot");
+    if (qp) setSpot(qp);
+  }, [location.search]);
+
+  const selectedSpotObj = spot ? spots.find(s => String(s.id) === String(spot)) : undefined;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,8 +63,39 @@ const BookAppointment = () => {
       toast({ title: "Missing fields", description: "Please fill in all required fields.", variant: "destructive" });
       return;
     }
-    setSubmitted(true);
-    toast({ title: "Date booked! 🎉", description: "Your appointment has been scheduled." });
+    // build payload
+    const scheduledIso = new Date(date);
+    // adjust scheduledIso with selected time (assumes local)
+    const [hourPart, meridiem] = time.split(" ");
+    const [hStr, mStr] = hourPart.split(":");
+    let h = parseInt(hStr, 10);
+    if (meridiem === "PM" && h !== 12) h += 12;
+    if (meridiem === "AM" && h === 12) h = 0;
+    scheduledIso.setHours(h, parseInt(mStr || "0", 10), 0, 0);
+
+    const estimate = selectedSpotObj ? costToEstimate(selectedSpotObj.cost) : { min: 0, max: 0 };
+
+    const payload = {
+      creatorId: user?.id || null,
+      participantId: matchUser,
+      title: "Date Appointment",
+      location: { placeName: selectedSpotObj?.name || "", address: selectedSpotObj?.location || "" },
+      scheduledTime: scheduledIso.toISOString(),
+      estimatedCost: { min: estimate.min, max: estimate.max, currency: "VND" }
+    };
+
+    fetch('/api/appointments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(async res => {
+      if (!res.ok) throw new Error('Failed to create appointment');
+      setSubmitted(true);
+      toast({ title: "Date booked! 🎉", description: "Your appointment has been scheduled." });
+    }).catch(err => {
+      console.error(err);
+      toast({ title: "Error", description: "Could not schedule appointment.", variant: 'destructive' });
+    });
   };
 
   if (submitted) {
@@ -139,10 +183,13 @@ const BookAppointment = () => {
                   <SelectTrigger><SelectValue placeholder="Select a date spot" /></SelectTrigger>
                   <SelectContent>
                     {spots.map(s => (
-                      <SelectItem key={s.id} value={String(s.id)}>{s.name} — {s.location}</SelectItem>
+                      <SelectItem key={s.id} value={String(s.id)}>{s.name} — {s.location} ({s.cost})</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {selectedSpotObj && (
+                  <p className="text-sm text-muted-foreground mt-2">Estimated cost: {selectedSpotObj.cost} (~{costToEstimate(selectedSpotObj.cost).min}-{costToEstimate(selectedSpotObj.cost).max} VND)</p>
+                )}
               </CardContent>
             </Card>
 
