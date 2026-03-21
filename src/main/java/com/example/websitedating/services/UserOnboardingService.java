@@ -122,15 +122,14 @@ public class UserOnboardingService {
             personalInfo.setRegion(location);
         }
 
-        validateCoordinates(request.getLongitude(), request.getLatitude());
-        personalInfo.setLocation(new GeoJsonPoint(request.getLongitude(), request.getLatitude()));
+        applyCoordinates(personalInfo, request.getLongitude(), request.getLatitude());
 
         String imageUrl = normalizeNullable(request.getImageUrl());
         if (imageUrl != null) {
             profile.setAvatarUrl(imageUrl);
         }
 
-        if (request.getPhotos() != null && !request.getPhotos().isEmpty()) {
+        if (request.getPhotos() != null) {
             List<String> photos = request.getPhotos().stream()
                     .filter(value -> value != null && !value.isBlank())
                     .map(String::trim)
@@ -138,7 +137,7 @@ public class UserOnboardingService {
                     .limit(6)
                     .collect(Collectors.toList());
             profile.setPhotos(photos);
-            if (!photos.isEmpty() && (profile.getAvatarUrl() == null || profile.getAvatarUrl().isBlank())) {
+            if (!photos.isEmpty()) {
                 profile.setAvatarUrl(photos.get(0));
             }
         }
@@ -300,6 +299,20 @@ public class UserOnboardingService {
         if (latitude < -90d || latitude > 90d) {
             throw new IllegalArgumentException("Latitude must be between -90 and 90");
         }
+    }
+
+    private void applyCoordinates(User.PersonalInfo personalInfo, Double longitude, Double latitude) {
+        if (longitude == null && latitude == null) {
+            if (personalInfo.getLocation() == null) {
+                throw new IllegalArgumentException("Longitude and latitude are required");
+            }
+            return;
+        }
+        if (longitude == null || latitude == null) {
+            throw new IllegalArgumentException("Longitude and latitude are required together");
+        }
+        validateCoordinates(longitude, latitude);
+        personalInfo.setLocation(new GeoJsonPoint(longitude, latitude));
     }
 
     private String ensureUniqueUsername(String preferredUsername, String email) {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useUser } from "@clerk/clerk-react";
@@ -38,6 +38,9 @@ export default function Onboarding() {
   const [isLocating, setIsLocating] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [locationPermissionError, setLocationPermissionError] = useState("");
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [uploadingSlotIndex, setUploadingSlotIndex] = useState<number | null>(null);
+  const [photoError, setPhotoError] = useState("");
   const [formData, setFormData] = useState({
     birthday: "",
     gender: "",
@@ -53,6 +56,73 @@ export default function Onboarding() {
   const selectedSlotRef = useRef(0);
   const navigate = useNavigate();
   const { user } = useUser();
+
+  const openPhotoPicker = (slotIndex: number) => {
+    selectedSlotRef.current = slotIndex;
+    photoInputRef.current?.click();
+  };
+
+  const removePhoto = (slotIndex: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      photos: prev.photos.filter((_, index) => index !== slotIndex),
+    }));
+    setPhotoError("");
+  };
+
+  const onPhotoSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setPhotoError("Please choose an image file.");
+      return;
+    }
+
+    const slotIndex = selectedSlotRef.current;
+    setPhotoError("");
+    setUploadingSlotIndex(slotIndex);
+    setIsUploadingPhoto(true);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+
+      const response = await fetch("/api/uploads/photos", {
+        method: "POST",
+        body,
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { message?: string };
+        throw new Error(data.message || "Photo upload failed");
+      }
+
+      const data = (await response.json()) as { url?: string };
+      if (!data.url) {
+        throw new Error("Photo URL was not returned");
+      }
+
+      setFormData((prev) => {
+        const next = [...prev.photos];
+        if (slotIndex < next.length) {
+          next[slotIndex] = data.url;
+        } else {
+          next.push(data.url);
+        }
+        return {
+          ...prev,
+          photos: next.slice(0, 6),
+        };
+      });
+    } catch (error) {
+      setPhotoError(error instanceof Error ? error.message : "Photo upload failed");
+    } finally {
+      setIsUploadingPhoto(false);
+      setUploadingSlotIndex(null);
+    }
+  };
 
   const reverseGeocodeCoordinates = async (latitude: number, longitude: number) => {
     try {
@@ -145,13 +215,14 @@ export default function Onboarding() {
         email: user?.primaryEmailAddress?.emailAddress || "",
         firstName: user?.firstName || "",
         lastName: user?.lastName || "",
-        imageUrl: user?.imageUrl || "",
+        imageUrl: formData.photos[0] || user?.imageUrl || "",
         birthday: formData.birthday,
         gender: formData.gender,
         lookingFor: formData.lookingFor,
         location: formData.location,
         longitude: formData.longitude,
         latitude: formData.latitude,
+        photos: formData.photos,
         interests: formData.interests,
         bio: formData.bio,
       };
@@ -181,6 +252,11 @@ export default function Onboarding() {
     if (formData.longitude === undefined || formData.latitude === undefined) {
       setSaveError("Can bat dinh vi de tiep tuc onboarding.");
       requestCurrentLocation();
+      return;
+    }
+
+    if (currentStep === 2 && formData.photos.length < 2) {
+      setPhotoError("Please upload at least 2 photos before continuing.");
       return;
     }
 
