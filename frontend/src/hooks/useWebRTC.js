@@ -49,7 +49,14 @@ export function useWebRTC(roomId, senderId) {
     let isMounted = true;
     const loadIceServers = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/webrtc/ice-servers`);
+        const token = await getToken();
+        const response = await fetch(`${API_BASE_URL}/api/webrtc/ice-servers`, {
+          headers: token
+            ? {
+                Authorization: `Bearer ${token}`,
+              }
+            : {},
+        });
         if (!response.ok) {
           return;
         }
@@ -68,7 +75,7 @@ export function useWebRTC(roomId, senderId) {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [getToken]);
 
   const sendSignal = useCallback(
     (type, data, targetId = null) => {

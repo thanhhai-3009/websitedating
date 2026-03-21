@@ -45,7 +45,6 @@ public class SecurityConfig {
                                 "/api/files/upload",
                                 "/api/discovery/**",
                                 "/api/chats/**",
-                                "/api/webrtc/**",
                                 "/ws/**",
                                 "/uploads/**",
                                 "/error")
