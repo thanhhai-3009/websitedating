@@ -18,7 +18,7 @@ function toAbsoluteUrl(url) {
   return `${API_BASE_URL}/${url}`;
 }
 
-export function useChat(roomId) {
+export function useChat(roomId, senderId = null) {
   const { getToken } = useAuth();
   const [messages, setMessages] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -31,7 +31,50 @@ export function useChat(roomId) {
   }, [roomId]);
 
   useEffect(() => {
-    setMessages([]);
+    let isMounted = true;
+
+    const loadHistory = async () => {
+      if (!roomId) {
+        setMessages([]);
+        return;
+      }
+
+      try {
+        const token = await getToken();
+        if (!token) {
+          throw new Error("Missing auth token");
+        }
+
+        const response = await axios.get(`${API_BASE_URL}/api/chats/${roomId}/messages`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!isMounted) {
+          return;
+        }
+
+        setMessages(Array.isArray(response.data) ? response.data : []);
+        setError(null);
+      } catch (historyError) {
+        if (!isMounted) {
+          return;
+        }
+        const message = historyError?.response?.data?.message || historyError?.message || "Cannot load message history.";
+        setMessages([]);
+        setError(message);
+      }
+    };
+
+    loadHistory();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [getToken, roomId]);
+
+  useEffect(() => {
     setError(null);
 
     if (!subscriptionTopic) {
@@ -104,9 +147,14 @@ export function useChat(roomId) {
         setError("Not connected to chat room.");
         return;
       }
+      if (!senderId) {
+        setError("Missing sender profile. Please wait a moment and try again.");
+        return;
+      }
 
       const payload = {
         roomId,
+        senderId,
         content,
         type: "CHAT",
       };
@@ -116,13 +164,17 @@ export function useChat(roomId) {
         body: JSON.stringify(payload),
       });
     },
-    [roomId]
+    [roomId, senderId]
   );
 
   const sendImageMessage = useCallback(
     async (file) => {
       if (!roomId) {
         setError("Missing roomId.");
+        return;
+      }
+      if (!senderId) {
+        setError("Missing sender profile. Please wait a moment and try again.");
         return;
       }
 
@@ -158,6 +210,7 @@ export function useChat(roomId) {
           destination: "/app/chat.sendMessage",
           body: JSON.stringify({
             roomId,
+            senderId,
             content: imageUrlForMessage,
             type: "IMAGE",
           }),
@@ -169,7 +222,7 @@ export function useChat(roomId) {
         setError(message);
       }
     },
-    [getToken, roomId]
+    [getToken, roomId, senderId]
   );
 
   const clearMessages = useCallback(() => setMessages([]), []);

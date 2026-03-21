@@ -55,7 +55,7 @@ interface ConversationItem {
 
 interface AuthMeResponse {
   id: string;
-  clerkId: string;
+  clerkId?: string;
 }
 
 const emojiList = ["😀", "😂", "😍", "🥰", "😎", "😅", "😘", "🥳", "❤️", "🔥", "🌹", "✨"];
@@ -206,7 +206,7 @@ export default function Messages() {
     error,
     sendTextMessage,
     sendImageMessage,
-  } = useChat(roomId);
+  } = useChat(roomId, backendUserId);
 
   const {
     isInCall,
