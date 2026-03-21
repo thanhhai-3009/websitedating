@@ -146,11 +146,21 @@ public class DiscoveryService {
                     if (candidate == null) {
                         return null;
                     }
-                    return MatchResponse.from(candidate, entry.getValue());
+                    return MatchResponse.from(candidate, entry.getValue(), buildDirectRoomId(me.getId(), candidate.getId()));
                 })
                 .filter(value -> value != null)
                 .limit(effectiveLimit)
                 .toList();
+    }
+
+    private String buildDirectRoomId(String firstUserId, String secondUserId) {
+        if (firstUserId == null || secondUserId == null) {
+            return null;
+        }
+        if (firstUserId.compareTo(secondUserId) <= 0) {
+            return "dm-" + firstUserId + "-" + secondUserId;
+        }
+        return "dm-" + secondUserId + "-" + firstUserId;
     }
 
     public void recordInteraction(RecordInteractionRequest request) {

@@ -38,11 +38,13 @@ interface MatchApiResponse {
   avatarUrl?: string;
   online?: boolean;
   matchedAt?: string;
+  roomId?: string;
 }
 
 interface ConversationItem {
   id: string;
   userId: string;
+  roomId?: string;
   user: {
     name: string;
     age?: number;
@@ -51,11 +53,6 @@ interface ConversationItem {
     verified: boolean;
   };
   timestamp: string;
-}
-
-interface AuthMeResponse {
-  id: string;
-  clerkId: string;
 }
 
 const emojiList = ["😀", "😂", "😍", "🥰", "😎", "😅", "😘", "🥳", "❤️", "🔥", "🌹", "✨"];
@@ -98,17 +95,10 @@ const toAbsoluteMediaUrl = (url?: string) => {
   return `${API_BASE_URL}/${url}`;
 };
 
-const createDirectRoomId = (myUserId: string | null, otherUserId: string | undefined) => {
-  if (!myUserId || !otherUserId) return null;
-  const sorted = [myUserId, otherUserId].sort();
-  return `dm-${sorted[0]}-${sorted[1]}`;
-};
-
 export default function Messages() {
   const location = useLocation();
   const preselectedConversationId = (location.state as { selectedConversationId?: string } | null)?.selectedConversationId;
-  const { userId: clerkId, userId, getToken } = useAuth();
-  const [backendUserId, setBackendUserId] = useState<string | null>(null);
+  const { userId: clerkId, userId } = useAuth();
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [draftMessage, setDraftMessage] = useState("");
@@ -132,29 +122,16 @@ export default function Messages() {
       setConversationsError(null);
 
       try {
-        const token = await getToken();
-        if (!token) {
-          throw new Error("Missing Clerk token");
-        }
-
-        const headers = {
-          Authorization: `Bearer ${token}`,
-        };
-
-        const meResponse = await axios.get<AuthMeResponse>(`${API_BASE_URL}/api/auth/me`, { headers });
-        const myId = meResponse.data?.id;
-
-        const matchesResponse = await axios.get<MatchApiResponse[]>(`${API_BASE_URL}/api/discovery/matches`, {
-          params: { clerkId },
-          headers,
-        });
+         const matchesResponse = await axios.get<MatchApiResponse[]>(`${API_BASE_URL}/api/discovery/matches`, {
+           params: { clerkId },
+         });
 
         if (!isMounted) return;
 
-        setBackendUserId(myId || null);
         const mappedConversations = (matchesResponse.data || []).map((match) => ({
           id: match.userId,
           userId: match.userId,
+          roomId: match.roomId,
           user: {
             name: match.displayName || "Match",
             age: match.age,
@@ -192,13 +169,10 @@ export default function Messages() {
     return () => {
       isMounted = false;
     };
-  }, [clerkId, getToken, preselectedConversationId, selectedConversation]);
+  }, [clerkId, preselectedConversationId, selectedConversation]);
 
   const selectedChat = conversations.find((c) => c.id === selectedConversation);
-  const roomId = useMemo(
-    () => createDirectRoomId(backendUserId, selectedChat?.userId),
-    [backendUserId, selectedChat?.userId]
-  );
+  const roomId = selectedChat?.roomId || null;
 
   const {
     messages: liveMessages,
@@ -234,7 +208,7 @@ export default function Messages() {
   const mappedLiveMessages = useMemo(() => {
     return (liveMessages || []).map((msg: any, index: number) => {
       const isImage = msg?.type === "IMAGE";
-      const mine = msg?.senderId ? msg.senderId === backendUserId || msg.senderId === userId : false;
+      const mine = msg?.senderId ? msg.senderId === userId : false;
       return {
         id: msg?.id || `${msg?.timestamp || "msg"}-${index}`,
         message: isImage ? "" : msg?.content || "",
@@ -244,7 +218,7 @@ export default function Messages() {
         status: mine ? ("sent" as const) : undefined,
       };
     });
-  }, [backendUserId, liveMessages, userId]);
+  }, [liveMessages, userId]);
 
   const handleSendMessage = async (message: string) => {
     if (!message.trim()) return;
