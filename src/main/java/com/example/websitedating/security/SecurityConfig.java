@@ -36,18 +36,19 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
-                                "/api/auth/register",
-                                "/api/auth/login",
-                                "/api/users/onboarding",
-                                "/api/users/profile/**",
-                                "/api/users/resolve/**",
-                                "/api/uploads/photos",
-                                "/api/files/upload",
-                                "/api/discovery/**",
-                                "/api/chats/**",
-                                "/ws/**",
-                                "/uploads/**",
-                                "/error")
+                            "/api/auth/register",
+                            "/api/auth/login",
+                            "/api/users/onboarding",
+                            "/api/users/profile/**",
+                            "/api/users/resolve/**",
+                            "/api/uploads/photos",
+                            "/api/files/upload",
+                            "/api/discovery/**",
+                            "/api/chats/**",
+                            "/api/appointments/**",
+                            "/ws/**",
+                            "/uploads/**",
+                            "/error")
                         .permitAll()
                         .anyRequest()
                         .authenticated())
