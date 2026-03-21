@@ -111,6 +111,8 @@ public class UserOnboardingService {
         User.PersonalInfo personalInfo = ensurePersonalInfo(profile.getPersonalInfo());
         User.Preferences preferences = ensurePreferences(user.getPreferences());
 
+        applyPhone(user, request.getPhone());
+
         String fullName = fullName(request.getFirstName(), request.getLastName());
         if (!fullName.isBlank()) {
             personalInfo.setName(fullName);
@@ -176,6 +178,26 @@ public class UserOnboardingService {
         user.setPreferences(preferences);
         user.setBehaviorSignals(ensureBehaviorSignals(user.getBehaviorSignals()));
         user.setSettings(ensureSettings(user.getSettings()));
+    }
+
+    private void applyPhone(User user, String rawPhone) {
+        String phone = normalizePhone(rawPhone);
+        if (phone == null) {
+            return;
+        }
+
+        if (phone.equals(user.getPhone())) {
+            return;
+        }
+
+        boolean alreadyUsed = userRepository.findByPhone(phone)
+                .filter(existing -> !existing.getId().equals(user.getId()))
+                .isPresent();
+        if (alreadyUsed) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Phone already exists");
+        }
+
+        user.setPhone(phone);
     }
 
     private List<String> mapPreferredGenders(String lookingFor) {
@@ -298,6 +320,14 @@ public class UserOnboardingService {
             return null;
         }
         return value.trim();
+    }
+
+    private String normalizePhone(String value) {
+        String normalized = normalizeNullable(value);
+        if (normalized == null) {
+            return null;
+        }
+        return normalized.replaceAll("[\\s()-]", "");
     }
 
     private void validateCoordinates(Double longitude, Double latitude) {

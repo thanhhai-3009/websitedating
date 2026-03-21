@@ -5,6 +5,14 @@ import { useUser } from "@clerk/clerk-react";
 import { Layout } from "@/components/layout/Layout";
 import { ProfileCard } from "@/components/cards/ProfileCard";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 
 type DiscoverCandidate = {
@@ -19,14 +27,48 @@ type DiscoverCandidate = {
   distanceKm?: number;
 };
 
+type DiscoverFilter = "natural" | "location" | "interests";
+
+const NATURAL_SEEN_STORAGE_PREFIX = "discover:natural:seen:";
+
+const getSeenStorageKey = (clerkId: string) => `${NATURAL_SEEN_STORAGE_PREFIX}${clerkId}`;
+
+const loadSeenUserIds = (clerkId: string) => {
+  try {
+    const raw = localStorage.getItem(getSeenStorageKey(clerkId));
+    if (!raw) return [] as string[];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [] as string[];
+    return parsed.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  } catch {
+    return [] as string[];
+  }
+};
+
+const saveSeenUserIds = (clerkId: string, userIds: string[]) => {
+  try {
+    localStorage.setItem(getSeenStorageKey(clerkId), JSON.stringify(userIds.slice(-500)));
+  } catch {
+    // Ignore storage errors to keep Discover functional in private mode.
+  }
+};
+
 export default function Discover() {
   const { user } = useUser();
   const [users, setUsers] = useState<DiscoverCandidate[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [useLocationFilter, setUseLocationFilter] = useState(false);
+  const [useInterestFilter, setUseInterestFilter] = useState(false);
   const [direction, setDirection] = useState<"left" | "right" | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState("");
   const { toast } = useToast();
+
+  const activeFilter: DiscoverFilter = useLocationFilter
+    ? "location"
+    : useInterestFilter
+      ? "interests"
+      : "natural";
 
   const currentUser = users[currentIndex];
 
@@ -58,19 +100,22 @@ export default function Discover() {
       setLoading(true);
       setFetchError("");
       try {
-        let endpoint = `/api/discovery/recommendations?clerkId=${encodeURIComponent(clerkId)}&limit=40`;
+        const recommendationsEndpoint = `/api/discovery/recommendations?clerkId=${encodeURIComponent(clerkId)}&limit=40`;
+        let endpoint = recommendationsEndpoint;
 
-        try {
+        if (activeFilter === "location") {
           const position = await getCurrentPosition();
           endpoint = `/api/discovery/nearby?clerkId=${encodeURIComponent(clerkId)}&longitude=${position.longitude}&latitude=${position.latitude}&radiusKm=40&limit=40`;
-        } catch {
-          endpoint = `/api/discovery/recommendations?clerkId=${encodeURIComponent(clerkId)}&limit=40`;
+        } else if (activeFilter === "interests") {
+          endpoint = recommendationsEndpoint;
+        } else {
+          endpoint = recommendationsEndpoint;
         }
 
         let response = await fetch(endpoint);
 
-        if (!response.ok && endpoint.includes("/nearby")) {
-          response = await fetch(`/api/discovery/recommendations?clerkId=${encodeURIComponent(clerkId)}&limit=40`);
+        if (!response.ok && activeFilter === "location") {
+          response = await fetch(recommendationsEndpoint);
         }
 
         if (!response.ok) {
@@ -80,7 +125,14 @@ export default function Discover() {
 
         const data = (await response.json()) as DiscoverCandidate[];
         if (!cancelled) {
-          setUsers(data);
+          if (activeFilter === "natural") {
+            const seenIds = new Set(loadSeenUserIds(clerkId));
+            const unseen = data.filter((candidate) => !seenIds.has(candidate.userId));
+            const seen = data.filter((candidate) => seenIds.has(candidate.userId));
+            setUsers(unseen.length > 0 ? [...unseen, ...seen] : data);
+          } else {
+            setUsers(data);
+          }
           setCurrentIndex(0);
         }
       } catch (error) {
@@ -99,7 +151,14 @@ export default function Discover() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [activeFilter, user?.id]);
+
+  const markSeenIfNatural = (userId: string) => {
+    if (!user?.id || activeFilter !== "natural") return;
+    const seenIds = loadSeenUserIds(user.id);
+    if (seenIds.includes(userId)) return;
+    saveSeenUserIds(user.id, [...seenIds, userId]);
+  };
 
   const currentCard = useMemo(() => {
     if (!currentUser) return null;
@@ -148,6 +207,7 @@ export default function Discover() {
 
   const handleLike = () => {
     if (!currentUser) return;
+    markSeenIfNatural(currentUser.userId);
     setDirection("right");
     recordInteraction("like", "match_invite").catch(() => null);
     toast({
@@ -159,6 +219,7 @@ export default function Discover() {
 
   const handlePass = () => {
     if (!currentUser) return;
+    markSeenIfNatural(currentUser.userId);
     setDirection("left");
     recordInteraction("pass").catch(() => null);
     nextCard();
@@ -166,6 +227,7 @@ export default function Discover() {
 
   const handleSuperLike = () => {
     if (!currentUser) return;
+    markSeenIfNatural(currentUser.userId);
     setDirection("right");
     recordInteraction("like", "match_invite").catch(() => null);
     toast({
@@ -190,10 +252,30 @@ export default function Discover() {
                 Find your perfect match
               </p>
             </div>
-            <Button variant="outline" className="gap-2">
-              <Filter className="w-4 h-4" />
-              Filters
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="gap-2">
+                  <Filter className="w-4 h-4" />
+                  Filters
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel>Discover filters</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuCheckboxItem
+                  checked={useLocationFilter}
+                  onCheckedChange={(checked) => setUseLocationFilter(Boolean(checked))}
+                >
+                  Location
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={useInterestFilter}
+                  onCheckedChange={(checked) => setUseInterestFilter(Boolean(checked))}
+                >
+                  Interests
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           {/* Card Stack */}
