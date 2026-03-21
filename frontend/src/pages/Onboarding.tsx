@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useUser } from "@clerk/clerk-react";
@@ -35,15 +35,19 @@ const interestOptions = [
 export default function Onboarding() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [locationPermissionError, setLocationPermissionError] = useState("");
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [uploadingSlotIndex, setUploadingSlotIndex] = useState<number | null>(null);
-  const [saveError, setSaveError] = useState("");
   const [photoError, setPhotoError] = useState("");
   const [formData, setFormData] = useState({
     birthday: "",
     gender: "",
     lookingFor: "",
     location: "",
+    longitude: undefined as number | undefined,
+    latitude: undefined as number | undefined,
     photos: [] as string[],
     interests: [] as string[],
     bio: "",
@@ -55,19 +59,15 @@ export default function Onboarding() {
 
   const openPhotoPicker = (slotIndex: number) => {
     selectedSlotRef.current = slotIndex;
-    setPhotoError("");
     photoInputRef.current?.click();
   };
 
   const removePhoto = (slotIndex: number) => {
-    setFormData((prev) => {
-      const nextPhotos = [...prev.photos];
-      nextPhotos[slotIndex] = "";
-      return {
-        ...prev,
-        photos: nextPhotos,
-      };
-    });
+    setFormData((prev) => ({
+      ...prev,
+      photos: prev.photos.filter((_, index) => index !== slotIndex),
+    }));
+    setPhotoError("");
   };
 
   const onPhotoSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -77,15 +77,14 @@ export default function Onboarding() {
       return;
     }
     if (!file.type.startsWith("image/")) {
-      setPhotoError("Vui long chon file anh hop le");
+      setPhotoError("Please choose an image file.");
       return;
     }
 
     const slotIndex = selectedSlotRef.current;
-    setIsUploadingPhoto(true);
-    setUploadingSlotIndex(slotIndex);
     setPhotoError("");
-
+    setUploadingSlotIndex(slotIndex);
+    setIsUploadingPhoto(true);
     try {
       const body = new FormData();
       body.append("file", file);
@@ -97,31 +96,117 @@ export default function Onboarding() {
 
       if (!response.ok) {
         const data = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(data.message || "Upload anh that bai");
+        throw new Error(data.message || "Photo upload failed");
       }
 
       const data = (await response.json()) as { url?: string };
       if (!data.url) {
-        throw new Error("Khong nhan duoc URL anh");
+        throw new Error("Photo URL was not returned");
       }
 
       setFormData((prev) => {
-        const nextPhotos = [...prev.photos];
-        nextPhotos[slotIndex] = data.url;
+        const next = [...prev.photos];
+        if (slotIndex < next.length) {
+          next[slotIndex] = data.url;
+        } else {
+          next.push(data.url);
+        }
         return {
           ...prev,
-          photos: nextPhotos,
+          photos: next.slice(0, 6),
         };
       });
     } catch (error) {
-      setPhotoError(error instanceof Error ? error.message : "Upload anh that bai");
+      setPhotoError(error instanceof Error ? error.message : "Photo upload failed");
     } finally {
       setIsUploadingPhoto(false);
       setUploadingSlotIndex(null);
     }
   };
 
+  const reverseGeocodeCoordinates = async (latitude: number, longitude: number) => {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&accept-language=en`
+      );
+      if (!response.ok) {
+        return undefined;
+      }
+
+      const data = (await response.json()) as {
+        display_name?: string;
+        address?: {
+          city?: string;
+          town?: string;
+          village?: string;
+          state?: string;
+          country?: string;
+        };
+      };
+
+      const placeName = [
+        data.address?.city || data.address?.town || data.address?.village || data.address?.state,
+        data.address?.country,
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+      return placeName || data.display_name;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const requestCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationPermissionError("Trinh duyet khong ho tro dinh vi.");
+      return;
+    }
+
+    setIsLocating(true);
+    setLocationPermissionError("");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const longitude = position.coords.longitude;
+        const latitude = position.coords.latitude;
+
+        setFormData((prev) => ({
+          ...prev,
+          longitude,
+          latitude,
+        }));
+
+        void reverseGeocodeCoordinates(latitude, longitude).then((detectedLocation) => {
+          setFormData((prev) => ({
+            ...prev,
+            location:
+              detectedLocation ||
+              (prev.location.trim() ? prev.location : `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`),
+          }));
+        });
+
+        setIsLocating(false);
+      },
+      () => {
+        setLocationPermissionError(
+          "Vui long bat quyen dinh vi tren thiet bi va trinh duyet de tiep tuc."
+        );
+        setIsLocating(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 60000, timeout: 12000 }
+    );
+  };
+
+  useEffect(() => {
+    requestCurrentLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const saveOnboarding = async () => {
+    if (formData.longitude === undefined || formData.latitude === undefined) {
+      throw new Error("Can bat dinh vi de luu ho so onboarding.");
+    }
+
     setIsSaving(true);
     setSaveError("");
     try {
@@ -130,11 +215,13 @@ export default function Onboarding() {
         email: user?.primaryEmailAddress?.emailAddress || "",
         firstName: user?.firstName || "",
         lastName: user?.lastName || "",
-        imageUrl: user?.imageUrl || "",
+        imageUrl: formData.photos[0] || user?.imageUrl || "",
         birthday: formData.birthday,
         gender: formData.gender,
         lookingFor: formData.lookingFor,
         location: formData.location,
+        longitude: formData.longitude,
+        latitude: formData.latitude,
         photos: formData.photos,
         interests: formData.interests,
         bio: formData.bio,
@@ -162,12 +249,15 @@ export default function Onboarding() {
   };
 
   const handleNext = async () => {
-    if (currentStep === 2) {
-      const uploadedPhotoCount = formData.photos.filter((photo) => Boolean(photo && photo.trim())).length;
-      if (uploadedPhotoCount < 2) {
-        setPhotoError("Vui long them it nhat 2 anh truoc khi tiep tuc");
-        return;
-      }
+    if (formData.longitude === undefined || formData.latitude === undefined) {
+      setSaveError("Can bat dinh vi de tiep tuc onboarding.");
+      requestCurrentLocation();
+      return;
+    }
+
+    if (currentStep === 2 && formData.photos.length < 2) {
+      setPhotoError("Please upload at least 2 photos before continuing.");
+      return;
     }
 
     try {
@@ -312,6 +402,25 @@ export default function Onboarding() {
                       className="pl-10 h-12"
                     />
                   </div>
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="text-muted-foreground">
+                      {formData.longitude !== undefined && formData.latitude !== undefined
+                        ? `GPS: ${formData.latitude.toFixed(6)}, ${formData.longitude.toFixed(6)}`
+                        : "Chua lay duoc toa do GPS"}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={requestCurrentLocation}
+                      disabled={isLocating}
+                      className="h-8 px-3"
+                    >
+                      {isLocating ? "Locating..." : "Use current location"}
+                    </Button>
+                  </div>
+                  {locationPermissionError && (
+                    <p className="text-xs text-destructive">{locationPermissionError}</p>
+                  )}
                 </div>
               </div>
             )}

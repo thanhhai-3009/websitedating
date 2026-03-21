@@ -20,9 +20,9 @@ public class PhotoUploadService {
     private final String apiSecret;
 
     public PhotoUploadService(
-            @Value("${app.cloudinary.cloud-name}") String cloudName,
-            @Value("${app.cloudinary.api-key}") String apiKey,
-            @Value("${app.cloudinary.api-secret}") String apiSecret) {
+            @Value("${app.cloudinary.cloud-name:}") String cloudName,
+            @Value("${app.cloudinary.api-key:}") String apiKey,
+            @Value("${app.cloudinary.api-secret:}") String apiSecret) {
         this.cloudName = cloudName;
         this.apiKey = apiKey;
         this.apiSecret = apiSecret;
