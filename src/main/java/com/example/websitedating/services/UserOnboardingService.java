@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.springframework.data.mongodb.core.geo.GeoJsonPoint;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -105,6 +106,9 @@ public class UserOnboardingService {
             personalInfo.setLocationText(location);
             personalInfo.setRegion(location);
         }
+
+        validateCoordinates(request.getLongitude(), request.getLatitude());
+        personalInfo.setLocation(new GeoJsonPoint(request.getLongitude(), request.getLatitude()));
 
         String imageUrl = normalizeNullable(request.getImageUrl());
         if (imageUrl != null) {
@@ -255,6 +259,18 @@ public class UserOnboardingService {
             return null;
         }
         return value.trim();
+    }
+
+    private void validateCoordinates(Double longitude, Double latitude) {
+        if (longitude == null || latitude == null) {
+            throw new IllegalArgumentException("Longitude and latitude are required");
+        }
+        if (longitude < -180d || longitude > 180d) {
+            throw new IllegalArgumentException("Longitude must be between -180 and 180");
+        }
+        if (latitude < -90d || latitude > 90d) {
+            throw new IllegalArgumentException("Latitude must be between -90 and 90");
+        }
     }
 
     private String ensureUniqueUsername(String preferredUsername, String email) {
