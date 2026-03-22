@@ -19,11 +19,7 @@ import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 
-const matchedUsers = [
-  { id: 1, name: "Emma W.", initials: "EW", age: 26 },
-  { id: 2, name: "Sophie L.", initials: "SL", age: 24 },
-  { id: 3, name: "Olivia M.", initials: "OM", age: 28 },
-];
+
 
 // use `spots` imported from lib/dateSpots (includes cost metadata)
 
@@ -41,6 +37,24 @@ const BookAppointment = () => {
   const [submitted, setSubmitted] = useState(false);
   const { toast } = useToast();
   const { user } = useUser();
+  const [matchedUsers, setMatchedUsers] = useState<Array<any>>([]);
+
+  useEffect(() => {
+    const clerkId = user?.id;
+    if (!clerkId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/discovery/matches?clerkId=${encodeURIComponent(clerkId)}&limit=50`);
+        if (!res.ok) throw new Error('Failed to fetch matches');
+        const data = await res.json();
+        if (!cancelled) setMatchedUsers(data);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
   const location = useLocation();
 
   // preload spot from query param
@@ -144,24 +158,24 @@ const BookAppointment = () => {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {matchedUsers.map(user => (
+                  {matchedUsers.map((m) => (
                     <button
                       type="button"
-                      key={user.id}
-                      onClick={() => setMatchUser(String(user.id))}
+                      key={m.userId || m.id}
+                      onClick={() => setMatchUser(String(m.clerkId ?? m.userId ?? m.id))}
                       className={cn(
                         "flex items-center gap-3 p-3 rounded-xl border-2 transition-all",
-                        matchUser === String(user.id)
+                        matchUser === String(m.clerkId ?? m.userId ?? m.id)
                           ? "border-primary bg-coral-light/30"
                           : "border-border hover:border-primary/50"
                       )}
                     >
                       <Avatar className="h-10 w-10">
-                        <AvatarFallback className="gradient-primary text-primary-foreground text-sm">{user.initials}</AvatarFallback>
+                        <AvatarFallback className="gradient-primary text-primary-foreground text-sm">{((m.displayName||m.username||'U').split(' ').map((s:any)=>s[0]).slice(0,2).join(''))}</AvatarFallback>
                       </Avatar>
                       <div className="text-left">
-                        <p className="font-medium text-foreground text-sm">{user.name}</p>
-                        <p className="text-xs text-muted-foreground">Age {user.age}</p>
+                        <p className="font-medium text-foreground text-sm">{m.displayName || m.username || 'User'}</p>
+                        <p className="text-xs text-muted-foreground">Age {m.age ?? '—'}</p>
                       </div>
                     </button>
                   ))}

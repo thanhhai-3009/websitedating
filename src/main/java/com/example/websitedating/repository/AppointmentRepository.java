@@ -1,4 +1,4 @@
-package com.example.websitedating.repositories;
+package com.example.websitedating.repository;
 
 import com.example.websitedating.models.Appointment;
 import java.util.List;

@@ -12,6 +12,7 @@ public class MatchResponse {
     private boolean online;
     private Instant matchedAt;
     private String roomId;
+    private String clerkId;
 
     public static MatchResponse from(User user, Instant matchedAt, String roomId) {
         MatchResponse response = new MatchResponse();
@@ -26,6 +27,7 @@ public class MatchResponse {
         response.online = user.getStatus() != null && Boolean.TRUE.equals(user.getStatus().getOnline());
         response.matchedAt = matchedAt;
         response.roomId = roomId;
+        response.clerkId = user.getClerkId();
         return response;
     }
 
@@ -55,5 +57,9 @@ public class MatchResponse {
 
     public String getRoomId() {
         return roomId;
+    }
+
+    public String getClerkId() {
+        return clerkId;
     }
 }

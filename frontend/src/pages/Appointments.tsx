@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { CalendarDays, Clock, MapPin, MessageCircle, Star, Trash2, Edit, Plus } from "lucide-react";
 import { motion } from "framer-motion";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { useUser } from "@clerk/clerk-react";
 
@@ -35,8 +35,11 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 };
 
 const Appointments = () => {
+  const navigate = useNavigate();
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [editAptRaw, setEditAptRaw] = useState<any | null>(null);
+  const [editUiStatus, setEditUiStatus] = useState<string>("pending");
   const { toast } = useToast();
   const { user } = useUser();
 
@@ -48,6 +51,27 @@ const Appointments = () => {
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
       // normalize server shape to UI shape
+      const mapBackendToUI = (s: any) => {
+        if (!s) return 'pending';
+        const st = String(s).toLowerCase();
+        switch (st) {
+          case 'scheduled':
+            return 'confirmed';
+          case 'proposed':
+            return 'pending';
+          case 'canceled':
+          case 'cancelled':
+            return 'cancelled';
+          case 'completed':
+            return 'completed';
+          case 'pending':
+          case 'confirmed':
+            return st;
+          default:
+            return st;
+        }
+      };
+
       const mapped = (data || []).map((it: any) => {
         const scheduled = it.scheduledTime ? new Date(it.scheduledTime) : null;
         const matchName = it.participantId ? String(it.participantId) : "Match";
@@ -60,7 +84,7 @@ const Appointments = () => {
           location: it.location?.address || "",
           date: scheduled ? format(scheduled, "PPP") : "",
           time: scheduled ? format(scheduled, "p") : "",
-          status: (it.status || "pending"),
+          status: mapBackendToUI(it.status),
           note: it.note || it.description || "",
         } as Appointment;
       });
@@ -118,8 +142,33 @@ const Appointments = () => {
               )}
               {showActions && (
                 <div className="flex gap-2 mt-3">
-                  <Button size="sm" variant="outline" className="gap-1"><Edit className="w-3.5 h-3.5" />Edit</Button>
-                  <Button size="sm" variant="outline" className="gap-1"><MessageCircle className="w-3.5 h-3.5" />Chat</Button>
+                  <Button size="sm" variant="outline" className="gap-1" onClick={async () => {
+                    try {
+                      const res = await fetch(`/api/appointments/${encodeURIComponent(apt.id)}`);
+                      if (!res.ok) throw new Error('Failed to load appointment');
+                      const data = await res.json();
+                      setEditAptRaw(data);
+                      // map backend status to UI status for selection
+                      const ui = (s: any) => {
+                        if (!s) return 'pending';
+                        const st = String(s).toLowerCase();
+                        if (st === 'scheduled') return 'confirmed';
+                        if (st === 'proposed') return 'pending';
+                        if (st === 'canceled' || st === 'cancelled') return 'cancelled';
+                        return st;
+                      };
+                      setEditUiStatus(ui(data.status));
+                    } catch (e) {
+                      console.error(e);
+                      toast({ title: 'Error', description: 'Could not load appointment for editing.', variant: 'destructive' });
+                    }
+                  }}><Edit className="w-3.5 h-3.5" />Edit</Button>
+
+                  <Button size="sm" variant="outline" className="gap-1" onClick={() => {
+                    // navigate to messages, preselect conversation by id
+                    navigate('/messages', { state: { selectedConversationId: apt.matchName } });
+                  }}><MessageCircle className="w-3.5 h-3.5" />Chat</Button>
+
                   <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
                     <Trash2 className="w-3.5 h-3.5" />Cancel
                   </Button>
@@ -191,6 +240,71 @@ const Appointments = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setCancelId(null)}>Keep Date</Button>
             <Button variant="destructive" onClick={handleCancel}>Cancel Date</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Dialog */}
+      <Dialog open={editAptRaw !== null} onOpenChange={() => setEditAptRaw(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-serif">Edit Appointment</DialogTitle>
+            <DialogDescription>Update appointment status. You can also modify details in this dialog.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div>
+              <label className="block text-sm text-muted-foreground mb-1">Match</label>
+              <div className="text-foreground">{editAptRaw?.participantId || editAptRaw?.participant || '—'}</div>
+            </div>
+            <div>
+              <label className="block text-sm text-muted-foreground mb-1">Place</label>
+              <div className="text-foreground">{editAptRaw?.location?.placeName || '—'}</div>
+            </div>
+            <div>
+              <label className="block text-sm text-muted-foreground mb-1">Scheduled</label>
+              <div className="text-foreground">{editAptRaw?.scheduledTime ? new Date(editAptRaw.scheduledTime).toLocaleString() : '—'}</div>
+            </div>
+
+            <div>
+              <label className="block text-sm text-muted-foreground mb-1">Status</label>
+              <select className="w-full p-2 border rounded" value={editUiStatus} onChange={(e) => setEditUiStatus(e.target.value)}>
+                <option value="pending">Pending</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditAptRaw(null)}>Close</Button>
+            <Button variant="gradient" onClick={async () => {
+              if (!editAptRaw) return;
+              const mapUIToBackend = (ui: string) => {
+                const s = String(ui).toLowerCase();
+                switch (s) {
+                  case 'confirmed': return 'scheduled';
+                  case 'pending': return 'proposed';
+                  case 'cancelled': return 'canceled';
+                  case 'completed': return 'completed';
+                  default: return s;
+                }
+              };
+              const updated = { ...editAptRaw, status: mapUIToBackend(editUiStatus) };
+              try {
+                const res = await fetch(`/api/appointments/${encodeURIComponent(editAptRaw.id)}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(updated),
+                });
+                if (!res.ok) throw new Error('Update failed');
+                toast({ title: 'Saved', description: 'Appointment updated.' });
+                setEditAptRaw(null);
+                fetchAppointments();
+              } catch (e) {
+                console.error(e);
+                toast({ title: 'Error', description: 'Could not update appointment.', variant: 'destructive' });
+              }
+            }}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
