@@ -43,6 +43,9 @@ public class User {
     @Builder.Default
     private Boolean isVerified = false;
 
+    @Builder.Default
+    private String role = "USER";
+
     private Profile profile;
     private Preferences preferences;
     private BehaviorSignals behaviorSignals;

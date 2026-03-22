@@ -47,8 +47,14 @@ export function useChat(roomId, senderId) {
 
     const loadHistory = async () => {
       try {
+        const token = await getToken();
         const response = await axios.get(`${API_BASE_URL}/api/chats/rooms/${encodeURIComponent(roomId)}/messages`, {
           params: { limit: 120 },
+          headers: token
+              ? {
+                Authorization: `Bearer ${token}`,
+              }
+              : undefined,
         });
         if (!isMounted) return;
         const history = Array.isArray(response.data) ? response.data : [];
@@ -127,80 +133,80 @@ export function useChat(roomId, senderId) {
   }, [getToken, roomId, subscriptionTopic]);
 
   const sendTextMessage = useCallback(
-    async (content) => {
-      const client = clientRef.current;
-      if (!client || !client.connected || !roomId) {
-        setError("Not connected to chat room.");
-        return;
-      }
-
-      const payload = {
-        roomId,
-        senderId: senderId || undefined,
-        content,
-        type: "CHAT",
-      };
-
-      client.publish({
-        destination: "/app/chat.sendMessage",
-        body: JSON.stringify(payload),
-      });
-    },
-    [roomId, senderId]
-  );
-
-  const sendImageMessage = useCallback(
-    async (file) => {
-      if (!roomId) {
-        setError("Missing roomId.");
-        return;
-      }
-
-      try {
-        const token = await getToken();
-        if (!token) {
-          throw new Error("Missing auth token");
-        }
-
-        const formData = new FormData();
-        formData.append("file", file);
-
-        const uploadResponse = await axios.post(`${API_BASE_URL}/api/files/upload`, formData, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "multipart/form-data",
-          },
-        });
-
-        const imageUrl = typeof uploadResponse.data === "string" ? uploadResponse.data : uploadResponse.data?.url;
-        if (!imageUrl) {
-          throw new Error("Upload did not return an image URL.");
-        }
-
-        const imageUrlForMessage = toAbsoluteUrl(imageUrl);
-
+      async (content) => {
         const client = clientRef.current;
-        if (!client || !client.connected) {
-          throw new Error("Not connected to chat room.");
+        if (!client || !client.connected || !roomId) {
+          setError("Not connected to chat room.");
+          return;
         }
+
+        const payload = {
+          roomId,
+          senderId: senderId || undefined,
+          content,
+          type: "CHAT",
+        };
 
         client.publish({
           destination: "/app/chat.sendMessage",
-          body: JSON.stringify({
-            roomId,
-            senderId: senderId || undefined,
-            content: imageUrlForMessage,
-            type: "IMAGE",
-          }),
+          body: JSON.stringify(payload),
         });
+      },
+      [roomId, senderId]
+  );
 
-        setError(null);
-      } catch (uploadError) {
-        const message = uploadError?.response?.data?.message || uploadError?.message || "Image upload failed.";
-        setError(message);
-      }
-    },
-    [getToken, roomId, senderId]
+  const sendImageMessage = useCallback(
+      async (file) => {
+        if (!roomId) {
+          setError("Missing roomId.");
+          return;
+        }
+
+        try {
+          const token = await getToken();
+          if (!token) {
+            throw new Error("Missing auth token");
+          }
+
+          const formData = new FormData();
+          formData.append("file", file);
+
+          const uploadResponse = await axios.post(`${API_BASE_URL}/api/files/upload`, formData, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "multipart/form-data",
+            },
+          });
+
+          const imageUrl = typeof uploadResponse.data === "string" ? uploadResponse.data : uploadResponse.data?.url;
+          if (!imageUrl) {
+            throw new Error("Upload did not return an image URL.");
+          }
+
+          const imageUrlForMessage = toAbsoluteUrl(imageUrl);
+
+          const client = clientRef.current;
+          if (!client || !client.connected) {
+            throw new Error("Not connected to chat room.");
+          }
+
+          client.publish({
+            destination: "/app/chat.sendMessage",
+            body: JSON.stringify({
+              roomId,
+              senderId: senderId || undefined,
+              content: imageUrlForMessage,
+              type: "IMAGE",
+            }),
+          });
+
+          setError(null);
+        } catch (uploadError) {
+          const message = uploadError?.response?.data?.message || uploadError?.message || "Image upload failed.";
+          setError(message);
+        }
+      },
+      [getToken, roomId, senderId]
   );
 
   const clearMessages = useCallback(() => setMessages([]), []);

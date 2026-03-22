@@ -135,7 +135,7 @@ public class UserOnboardingService {
             personalInfo.setRegion(location);
         }
 
-        applyCoordinates(personalInfo, request.getLongitude(), request.getLatitude());
+        applyCoordinates(personalInfo, request.getLongitude(), request.getLatitude(), location);
 
         String imageUrl = normalizeNullable(request.getImageUrl());
         if (imageUrl != null) {
@@ -342,10 +342,11 @@ public class UserOnboardingService {
         }
     }
 
-    private void applyCoordinates(User.PersonalInfo personalInfo, Double longitude, Double latitude) {
+    private void applyCoordinates(User.PersonalInfo personalInfo, Double longitude, Double latitude, String locationText) {
         if (longitude == null && latitude == null) {
-            if (personalInfo.getLocation() == null) {
-                throw new IllegalArgumentException("Longitude and latitude are required");
+            // Manual address input without GPS should remove stale coordinates from previous saves.
+            if (locationText != null) {
+                personalInfo.setLocation(null);
             }
             return;
         }

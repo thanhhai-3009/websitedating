@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Heart, MessageCircle, Bell, User, Menu, X, Sparkles, MapPin, CalendarDays } from "lucide-react";
+import { Heart, MessageCircle, Bell, User, Menu, X, Sparkles, MapPin, CalendarDays, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useNotifications } from "@/hooks/useNotifications";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 interface NavbarProps {
   isAuthenticated?: boolean;
@@ -15,6 +16,7 @@ export const Navbar = ({ isAuthenticated = false }: NavbarProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
   const { unreadNotifications } = useNotifications();
+  const { isAdmin } = useCurrentUser();
   const unreadCount = unreadNotifications.length;
 
   const navLinks = isAuthenticated
@@ -23,6 +25,7 @@ export const Navbar = ({ isAuthenticated = false }: NavbarProps) => {
         { to: "/matches", label: "Matches", icon: Heart },
         { to: "/messages", label: "Chat", icon: MessageCircle, badge: 3 },
         { to: "/date-spots", label: "Date Spots", icon: MapPin },
+        ...(isAdmin ? [{ to: "/admin", label: "Admin", icon: ShieldAlert }] : []),
         { to: "/appointments", label: "Appointments", icon: CalendarDays },
         { to: "/notifications", label: "Notifications", icon: Bell, badge: unreadCount > 0 ? unreadCount : undefined },
         { to: "/profile", label: "Profile", icon: User },
