@@ -15,12 +15,12 @@ interface CurrentUser {
 }
 
 export function useCurrentUser() {
-  const { getToken, isLoaded, isSignedIn } = useAuth();
+  const { userId: clerkId, isLoaded, isSignedIn } = useAuth();
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (!isLoaded || !isSignedIn) {
+    if (!isLoaded || !isSignedIn || !clerkId) {
       setUser(null);
       setIsLoading(false);
       return;
@@ -31,16 +31,8 @@ export function useCurrentUser() {
 
     const fetchMe = async () => {
       try {
-        const token = await getToken();
-
-        if (!token) {
-          setUser(null);
-          return;
-        }
-
-        const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
+        const res = await fetch(`${API_BASE_URL}/api/users/resolve/${encodeURIComponent(clerkId)}`, {
           signal: controller.signal,
-          headers: { Authorization: `Bearer ${token}` }
         });
         if (res.ok) {
           const data = await res.json() as CurrentUser;
@@ -60,7 +52,7 @@ export function useCurrentUser() {
     return () => {
       controller.abort();
     };
-  }, [getToken, isLoaded, isSignedIn]);
+  }, [clerkId, isLoaded, isSignedIn]);
 
   return { user, isLoading, isAdmin: user?.role === "ADMIN" };
 }
