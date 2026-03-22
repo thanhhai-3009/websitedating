@@ -46,6 +46,7 @@ public class SecurityConfig {
                             "/api/discovery/**",
                             "/api/chats/**",
                             "/api/appointments/**",
+                            "/api/notifications/**",
                             "/ws/**",
                             "/uploads/**",
                             "/error")

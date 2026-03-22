@@ -5,6 +5,7 @@ import { Heart, MessageCircle, Bell, User, Menu, X, Sparkles, MapPin, CalendarDa
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useNotifications } from "@/hooks/useNotifications";
 
 interface NavbarProps {
   isAuthenticated?: boolean;
@@ -13,6 +14,8 @@ interface NavbarProps {
 export const Navbar = ({ isAuthenticated = false }: NavbarProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
+  const { unreadNotifications } = useNotifications();
+  const unreadCount = unreadNotifications.length;
 
   const navLinks = isAuthenticated
     ? [
@@ -21,7 +24,7 @@ export const Navbar = ({ isAuthenticated = false }: NavbarProps) => {
         { to: "/messages", label: "Chat", icon: MessageCircle, badge: 3 },
         { to: "/date-spots", label: "Date Spots", icon: MapPin },
         { to: "/appointments", label: "Appointments", icon: CalendarDays },
-        { to: "/notifications", label: "Notifications", icon: Bell, badge: 5 },
+        { to: "/notifications", label: "Notifications", icon: Bell, badge: unreadCount > 0 ? unreadCount : undefined },
         { to: "/profile", label: "Profile", icon: User },
       ]
     : [];
