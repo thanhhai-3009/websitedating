@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
-const CLERK_TOKEN_TEMPLATE = import.meta.env.VITE_CLERK_TOKEN_TEMPLATE as string | undefined;
 
 interface CurrentUser {
   id: string;
@@ -32,9 +31,7 @@ export function useCurrentUser() {
 
     const fetchMe = async () => {
       try {
-        const token = CLERK_TOKEN_TEMPLATE
-          ? await getToken({ template: CLERK_TOKEN_TEMPLATE })
-          : await getToken();
+        const token = await getToken();
 
         if (!token) {
           setUser(null);
