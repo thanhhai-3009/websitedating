@@ -1,6 +1,7 @@
 package com.example.websitedating.dto;
 
 import com.example.websitedating.models.User;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,6 +26,9 @@ public class UserProfileResponse {
     private boolean emailVerified;
     private boolean phoneVerified;
     private boolean profileVerified;
+    private String premiumPlan;
+    private Instant premiumExpiresAt;
+    private boolean premiumActive;
 
     public static UserProfileResponse from(User user) {
         UserProfileResponse response = new UserProfileResponse();
@@ -59,6 +63,9 @@ public class UserProfileResponse {
         response.emailVerified = user.getEmail() != null && !user.getEmail().isBlank();
         response.phoneVerified = user.getPhone() != null && !user.getPhone().isBlank();
         response.profileVerified = Boolean.TRUE.equals(user.getIsVerified());
+        response.premiumPlan = user.getPremiumPlan();
+        response.premiumExpiresAt = user.getPremiumExpiresAt();
+        response.premiumActive = user.hasActivePremium();
 
         return response;
     }
@@ -155,5 +162,17 @@ public class UserProfileResponse {
 
     public boolean isProfileVerified() {
         return profileVerified;
+    }
+
+    public String getPremiumPlan() {
+        return premiumPlan;
+    }
+
+    public Instant getPremiumExpiresAt() {
+        return premiumExpiresAt;
+    }
+
+    public boolean isPremiumActive() {
+        return premiumActive;
     }
 }

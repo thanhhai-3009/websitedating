@@ -46,6 +46,10 @@ public class User {
     @Builder.Default
     private String role = "USER";
 
+    private String premiumPlan;
+
+    private Instant premiumExpiresAt;
+
     private Profile profile;
     private Preferences preferences;
     private BehaviorSignals behaviorSignals;
@@ -166,6 +170,10 @@ public class User {
         private Boolean online = false;
         @Builder.Default
         private Instant lastSeen = Instant.now();
+    }
+
+    public boolean hasActivePremium() {
+        return premiumExpiresAt != null && premiumExpiresAt.isAfter(Instant.now());
     }
 }
 

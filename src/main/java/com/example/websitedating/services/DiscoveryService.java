@@ -35,6 +35,8 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 
 @Service
 public class DiscoveryService {
@@ -68,6 +70,9 @@ public class DiscoveryService {
 
     public List<DiscoverUserResponse> nearby(String clerkId, Double longitude, Double latitude, Integer radiusKm, Integer limit) {
         User me = findByClerkId(clerkId);
+        if (!me.hasActivePremium()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "GPS nearby discovery requires an active premium subscription.");
+        }
         GeoJsonPoint center = resolveCenter(me, longitude, latitude);
         int effectiveRadiusKm = radiusKm == null || radiusKm <= 0 ? defaultRadius(me) : Math.min(radiusKm, 500);
         int effectiveLimit = limit == null || limit <= 0 ? 20 : Math.min(limit, 100);

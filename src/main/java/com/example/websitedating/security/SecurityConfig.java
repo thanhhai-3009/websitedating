@@ -46,6 +46,8 @@ public class SecurityConfig {
                                 "/api/files/upload",
                                 "/api/discovery/**",
                                 "/api/notifications/**",
+                                "/api/payments/momo/return",
+                                "/api/payments/momo/ipn",
                                 "/error")
                         .permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
