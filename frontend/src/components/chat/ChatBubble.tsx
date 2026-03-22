@@ -30,16 +30,18 @@ export const ChatBubble = ({
           <img src={image} alt="Shared" className="max-w-full max-h-60 object-cover" />
         </div>
       )}
-      <div
-        className={cn(
-          "px-4 py-3 rounded-2xl",
-          isOwn
-            ? "gradient-primary text-primary-foreground rounded-br-md"
-            : "bg-secondary text-secondary-foreground rounded-bl-md"
-        )}
-      >
-        <p className="text-sm leading-relaxed">{message}</p>
-      </div>
+      {message && (
+        <div
+          className={cn(
+            "px-4 py-3 rounded-2xl",
+            isOwn
+              ? "gradient-primary text-primary-foreground rounded-br-md"
+              : "bg-secondary text-secondary-foreground rounded-bl-md"
+          )}
+        >
+          <p className="text-sm leading-relaxed">{message}</p>
+        </div>
+      )}
       <div className="flex items-center gap-1 mt-1 px-1">
         <span className="text-[10px] text-muted-foreground">{timestamp}</span>
         {isOwn && status && (

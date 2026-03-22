@@ -1,22 +1,51 @@
 import { useState } from "react";
-import { Send, Image, Smile, Mic, Video } from "lucide-react";
+import { Send, Image, Smile, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
   onImageClick?: () => void;
-  onEmojiClick?: () => void;
+  onEmojiSelect?: (emoji: string) => void;
+  emojiOptions?: string[];
   onVideoCall?: () => void;
+  value?: string;
+  onChange?: (value: string) => void;
 }
 
 export const ChatInput = ({
   onSend,
   onImageClick,
-  onEmojiClick,
+  onEmojiSelect,
+  emojiOptions,
   onVideoCall,
+  value,
+  onChange,
 }: ChatInputProps) => {
-  const [message, setMessage] = useState("");
+  const [internalMessage, setInternalMessage] = useState("");
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const isControlled = value !== undefined;
+  const message = isControlled ? value : internalMessage;
+  const emojis =
+    emojiOptions && emojiOptions.length > 0
+      ? emojiOptions
+      : ["😀", "😂", "😍", "🥰", "😎", "😅", "😘", "🥳", "❤️", "🔥", "🌹", "✨"];
+
+  const setMessage = (nextValue: string) => {
+    if (!isControlled) {
+      setInternalMessage(nextValue);
+    }
+    onChange?.(nextValue);
+  };
+
+  const handleEmojiSelect = (emoji: string) => {
+    onEmojiSelect?.(emoji);
+    if (!onEmojiSelect) {
+      setMessage(`${message}${emoji}`);
+    }
+    setEmojiOpen(false);
+  };
 
   const handleSend = () => {
     if (message.trim()) {
@@ -40,22 +69,41 @@ export const ChatInput = ({
           size="icon"
           className="text-muted-foreground hover:text-foreground"
           onClick={onImageClick}
+          type="button"
         >
           <Image className="w-5 h-5" />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-muted-foreground hover:text-foreground"
-          onClick={onEmojiClick}
-        >
-          <Smile className="w-5 h-5" />
-        </Button>
+        <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground hover:text-foreground"
+              type="button"
+            >
+              <Smile className="w-5 h-5" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-64 p-3" align="start">
+            <div className="grid grid-cols-6 gap-2">
+              {emojis.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  className="text-xl hover:bg-secondary rounded p-1"
+                  onClick={() => handleEmojiSelect(emoji)}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
       <Input
         value={message}
         onChange={(e) => setMessage(e.target.value)}
-        onKeyPress={handleKeyPress}
+        onKeyDown={handleKeyPress}
         placeholder="Type a message..."
         className="flex-1 bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary"
       />
@@ -65,6 +113,7 @@ export const ChatInput = ({
           size="icon"
           className="text-muted-foreground hover:text-primary"
           onClick={onVideoCall}
+          type="button"
         >
           <Video className="w-5 h-5" />
         </Button>
@@ -74,6 +123,7 @@ export const ChatInput = ({
           className="rounded-full"
           onClick={handleSend}
           disabled={!message.trim()}
+          type="button"
         >
           <Send className="w-5 h-5" />
         </Button>

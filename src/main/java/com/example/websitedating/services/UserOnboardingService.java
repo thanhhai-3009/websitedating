@@ -68,6 +68,17 @@ public class UserOnboardingService {
         return UserProfileResponse.from(user);
     }
 
+    public UserResponse getUserByClerkId(String clerkId) {
+        String normalizedClerkId = normalizeNullable(clerkId);
+        if (normalizedClerkId == null) {
+            throw new IllegalArgumentException("Clerk ID is required");
+        }
+
+        User user = userRepository.findByClerkId(normalizedClerkId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        return UserResponse.from(user);
+    }
+
     private User ensureClerkLinked(User user, String clerkId) {
         if (user.getClerkId() != null && !user.getClerkId().equals(clerkId)) {
             throw new IllegalArgumentException("Email is already linked to another Clerk account");
@@ -99,6 +110,8 @@ public class UserOnboardingService {
         User.Profile profile = ensureProfile(user.getProfile());
         User.PersonalInfo personalInfo = ensurePersonalInfo(profile.getPersonalInfo());
         User.Preferences preferences = ensurePreferences(user.getPreferences());
+
+        applyPhone(user, request.getPhone());
 
         String fullName = fullName(request.getFirstName(), request.getLastName());
         if (!fullName.isBlank()) {
@@ -165,6 +178,26 @@ public class UserOnboardingService {
         user.setPreferences(preferences);
         user.setBehaviorSignals(ensureBehaviorSignals(user.getBehaviorSignals()));
         user.setSettings(ensureSettings(user.getSettings()));
+    }
+
+    private void applyPhone(User user, String rawPhone) {
+        String phone = normalizePhone(rawPhone);
+        if (phone == null) {
+            return;
+        }
+
+        if (phone.equals(user.getPhone())) {
+            return;
+        }
+
+        boolean alreadyUsed = userRepository.findByPhone(phone)
+                .filter(existing -> !existing.getId().equals(user.getId()))
+                .isPresent();
+        if (alreadyUsed) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Phone already exists");
+        }
+
+        user.setPhone(phone);
     }
 
     private List<String> mapPreferredGenders(String lookingFor) {
@@ -287,6 +320,14 @@ public class UserOnboardingService {
             return null;
         }
         return value.trim();
+    }
+
+    private String normalizePhone(String value) {
+        String normalized = normalizeNullable(value);
+        if (normalized == null) {
+            return null;
+        }
+        return normalized.replaceAll("[\\s()-]", "");
     }
 
     private void validateCoordinates(Double longitude, Double latitude) {

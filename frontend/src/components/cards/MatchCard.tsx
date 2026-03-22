@@ -14,7 +14,7 @@ interface MatchCardProps {
   };
   isNew?: boolean;
   onClick?: () => void;
-  onMessage?: () => void;
+  onMessage?: (userId: string) => void;
   className?: string;
 }
 
@@ -75,7 +75,7 @@ export const MatchCard = ({
         className="mt-3 gap-1"
         onClick={(e) => {
           e.stopPropagation();
-          onMessage?.();
+          onMessage?.(user.id);
         }}
       >
         <MessageCircle className="w-4 h-4" />

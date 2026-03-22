@@ -40,7 +40,9 @@ public class SecurityConfig {
                                 "/api/auth/login",
                                 "/api/users/onboarding",
                                 "/api/users/profile/**",
+                                "/api/users/resolve/**",
                                 "/api/uploads/photos",
+                                "/api/files/upload",
                                 "/api/discovery/**",
                                 "/api/notifications/**",
                                 "/error")
@@ -73,4 +75,3 @@ public class SecurityConfig {
         return source;
     }
 }
-
