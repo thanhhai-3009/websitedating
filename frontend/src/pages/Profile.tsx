@@ -257,7 +257,9 @@ export default function Profile() {
 
   const requestCurrentLocation = () => {
     if (!navigator.geolocation) {
-      setLocationPermissionError("Trinh duyet khong ho tro dinh vi.");
+      setLocationPermissionError(
+        "Geolocation is not supported by this browser. Please enter your location manually."
+      );
       return;
     }
 
@@ -285,10 +287,20 @@ export default function Profile() {
 
         setIsLocating(false);
       },
-      () => {
-        setLocationPermissionError(
-          "Vui long bat quyen dinh vi tren thiet bi va trinh duyet de tiep tuc."
-        );
+      (geoError) => {
+        if (geoError.code === geoError.PERMISSION_DENIED) {
+          setLocationPermissionError(
+            "Location access is turned off. Please enable location permission in your browser/device settings and try again."
+          );
+        } else if (geoError.code === geoError.TIMEOUT) {
+          setLocationPermissionError(
+            "Could not get your current location in time. Please try again or enter your location manually."
+          );
+        } else {
+          setLocationPermissionError(
+            "Unable to detect your current location. Please try again or enter your location manually."
+          );
+        }
         setIsLocating(false);
       },
       { enableHighAccuracy: true, maximumAge: 60000, timeout: 12000 }
@@ -645,7 +657,15 @@ export default function Profile() {
                     />
                     <Input
                       value={profile.location}
-                      onChange={(event) => setProfile((prev) => ({ ...prev, location: event.target.value }))}
+                      onChange={(event) => {
+                        setLocationPermissionError("");
+                        setProfile((prev) => ({
+                          ...prev,
+                          location: event.target.value,
+                          longitude: undefined,
+                          latitude: undefined,
+                        }));
+                      }}
                       placeholder="City"
                     />
                   </div>
@@ -653,7 +673,7 @@ export default function Profile() {
                     <span className="text-muted-foreground">
                       {profile.longitude !== undefined && profile.latitude !== undefined
                         ? `GPS: ${profile.latitude.toFixed(6)}, ${profile.longitude.toFixed(6)}`
-                        : "Chua co toa do GPS"}
+                        : "No GPS coordinates yet"}
                     </span>
                     <Button
                       type="button"
