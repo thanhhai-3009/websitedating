@@ -7,6 +7,9 @@ interface CurrentUser {
   username: string;
   email: string;
   role: string;
+  premiumPlan?: string;
+  premiumExpiresAt?: string;
+  premiumActive?: boolean;
 }
 
 export function useCurrentUser() {
@@ -38,7 +41,7 @@ export function useCurrentUser() {
     };
 
     fetchMe();
-  }, [isLoaded, isSignedIn]);
+  }, [getToken, isLoaded, isSignedIn]);
 
   return { user, isLoading, isAdmin: user?.role === "ADMIN" };
 }

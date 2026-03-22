@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Navbar } from "@/components/layout/Navbar";
 import { useNavigate } from "react-router-dom";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 const plans = [
   {
@@ -83,9 +84,17 @@ const perks = [
 
 const Premium = () => {
   const navigate = useNavigate();
+  const { user, isLoading } = useCurrentUser();
+
+  const normalizedPlan = (user?.premiumPlan || "").trim().toLowerCase();
+  const currentPlanId = user?.premiumActive && (normalizedPlan === "gold" || normalizedPlan === "platinum")
+    ? normalizedPlan
+    : "basic";
+  const hasActivePlatinum = !isLoading && user?.premiumActive && currentPlanId === "platinum";
 
   const handleSelectPlan = (planId: string) => {
-    if (planId !== "basic") {
+    const isGoldBlockedByPlatinum = hasActivePlatinum && planId === "gold";
+    if (planId !== currentPlanId && !isGoldBlockedByPlatinum && planId !== "basic") {
       navigate(`/payment?plan=${planId}`);
     }
   };
@@ -115,7 +124,12 @@ const Premium = () => {
 
         {/* Plans Grid */}
         <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto mb-16">
-          {plans.map((plan, index) => (
+          {plans.map((plan, index) => {
+            const isCurrentPlan = !isLoading && plan.id === currentPlanId;
+            const isGoldBlockedByPlatinum = hasActivePlatinum && plan.id === "gold";
+            const isPlanDisabled = isCurrentPlan || isGoldBlockedByPlatinum;
+
+            return (
             <motion.div
               key={plan.id}
               initial={{ opacity: 0, y: 20 }}
@@ -134,6 +148,11 @@ const Premium = () => {
                     <Badge className="bg-primary text-primary-foreground shadow-md">
                       Most Popular
                     </Badge>
+                  </div>
+                )}
+                {isCurrentPlan && (
+                  <div className="absolute top-3 right-3">
+                    <Badge className="gradient-primary border-0">Active</Badge>
                   </div>
                 )}
                 
@@ -167,13 +186,19 @@ const Premium = () => {
                     variant={plan.popular ? "gradient" : "outline"}
                     className="w-full"
                     size="lg"
+                    disabled={isPlanDisabled}
                   >
-                    {plan.id === "basic" ? "Current Plan" : "Get Started"}
+                    {isCurrentPlan
+                      ? "Current Plan"
+                      : isGoldBlockedByPlatinum
+                        ? "Included in Platinum"
+                        : "Get Started"}
                   </Button>
                 </CardContent>
               </Card>
             </motion.div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Perks Section */}
