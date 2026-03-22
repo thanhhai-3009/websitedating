@@ -10,6 +10,7 @@ public class UserResponse {
     private String clerkId;
     private String phone;
     private boolean isVerified;
+    private String role;
 
     public static UserResponse from(User user) {
         UserResponse response = new UserResponse();
@@ -19,6 +20,7 @@ public class UserResponse {
         response.clerkId = user.getClerkId();
         response.phone = user.getPhone();
         response.isVerified = Boolean.TRUE.equals(user.getIsVerified());
+        response.role = user.getRole();
         return response;
     }
 
@@ -44,5 +46,9 @@ public class UserResponse {
 
     public boolean isVerified() {
         return isVerified;
+    }
+
+    public String getRole() {
+        return role;
     }
 }

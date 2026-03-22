@@ -47,6 +47,7 @@ public class SecurityConfig {
                                 "/api/notifications/**",
                                 "/error")
                         .permitAll()
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest()
                         .authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

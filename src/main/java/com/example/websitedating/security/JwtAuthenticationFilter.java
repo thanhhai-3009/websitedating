@@ -71,7 +71,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             Optional<User> userOpt = userRepository.findByEmailIgnoreCase(email);
             if (userOpt.isPresent() && jwtService.isTokenValid(token, userOpt.get().getEmail())) {
-                setAuthentication(userOpt.get().getEmail(), request);
+                setAuthentication(userOpt.get().getEmail(), userOpt.get().getRole(), request);
                 return true;
             }
         } catch (Exception ignored) {
@@ -99,14 +99,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String principalName = userOpt.get().getClerkId() != null && !userOpt.get().getClerkId().isBlank()
                 ? userOpt.get().getClerkId()
                 : userOpt.get().getEmail();
-        setAuthentication(principalName, request);
+        setAuthentication(principalName, userOpt.get().getRole(), request);
     }
 
-    private void setAuthentication(String principalName, HttpServletRequest request) {
+    private void setAuthentication(String principalName, String role, HttpServletRequest request) {
+        String authority = role != null && role.startsWith("ROLE_") ? role : "ROLE_" + (role != null ? role.toUpperCase(Locale.ROOT) : "USER");
         UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                 principalName,
                 null,
-                List.of(new SimpleGrantedAuthority("ROLE_USER")));
+                List.of(new SimpleGrantedAuthority(authority)));
         authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
         SecurityContextHolder.getContext().setAuthentication(authentication);
     }
