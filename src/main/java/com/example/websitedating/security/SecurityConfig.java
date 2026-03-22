@@ -44,9 +44,7 @@ public class SecurityConfig {
                                 "/api/uploads/photos",
                                 "/api/files/upload",
                                 "/api/discovery/**",
-                                "/api/chats/**",
-                                "/ws/**",
-                                "/uploads/**",
+                                "/api/notifications/**",
                                 "/error")
                         .permitAll()
                         .anyRequest()
