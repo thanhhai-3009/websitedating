@@ -42,12 +42,37 @@ const AdminUsers = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
 
-  const getAuthorizationHeader = async () => {
-    const token = await getToken();
+  const getAuthorizationHeader = async (forceRefresh = false) => {
+    const token = await getToken({ skipCache: forceRefresh });
     if (!token) {
       throw new Error("Missing auth token");
     }
     return { Authorization: `Bearer ${token}` };
+  };
+
+  const authorizedFetch = async (url: string, init: RequestInit = {}) => {
+    const firstHeaders = await getAuthorizationHeader(false);
+    const firstResponse = await fetch(url, {
+      ...init,
+      headers: {
+        ...(init.headers || {}),
+        ...firstHeaders,
+      },
+    });
+
+    if (firstResponse.status !== 401 && firstResponse.status !== 403) {
+      return firstResponse;
+    }
+
+    // Retry once with a fresh token in case Clerk cache returned an expired token.
+    const refreshedHeaders = await getAuthorizationHeader(true);
+    return fetch(url, {
+      ...init,
+      headers: {
+        ...(init.headers || {}),
+        ...refreshedHeaders,
+      },
+    });
   };
 
   // Guard: redirect if not admin
@@ -64,10 +89,7 @@ const AdminUsers = () => {
     }
 
     try {
-      const headers = await getAuthorizationHeader();
-      const response = await fetch(`${API_BASE_URL}/api/admin/users`, {
-        headers,
-      });
+      const response = await authorizedFetch(`${API_BASE_URL}/api/admin/users`);
       if (!response.ok) throw new Error("Failed to fetch users");
       const data = await response.json();
       setUsers(data);
@@ -92,9 +114,8 @@ const AdminUsers = () => {
   const handleDeleteUser = async (userId: string, username: string) => {
     if (!window.confirm(`Are you sure you want to permanently delete "${username}"? This will remove them from both the database and Clerk.`)) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/users/${userId}`, {
+      const response = await authorizedFetch(`${API_BASE_URL}/api/admin/users/${userId}`, {
         method: "DELETE",
-        headers: await getAuthorizationHeader(),
       });
       if (!response.ok) throw new Error("Failed to delete user");
       toast({ title: "✅ User deleted", description: `"${username}" has been permanently removed.` });
@@ -106,10 +127,9 @@ const AdminUsers = () => {
 
   const handleRoleChange = async (userId: string, username: string, newRole: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/users/${userId}/role`, {
+      const response = await authorizedFetch(`${API_BASE_URL}/api/admin/users/${userId}/role`, {
         method: "PATCH",
         headers: {
-          ...(await getAuthorizationHeader()),
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ role: newRole })
