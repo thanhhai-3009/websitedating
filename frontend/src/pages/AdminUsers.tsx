@@ -17,6 +17,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Navbar } from "@/components/layout/Navbar";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+
 interface User {
   id: string;
   clerkId: string;
@@ -31,7 +33,7 @@ interface User {
 }
 
 const AdminUsers = () => {
-  const { getToken } = useAuth();
+  const { getToken, isLoaded, isSignedIn } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user: currentUser, isLoading: isLoadingMe, isAdmin } = useCurrentUser();
@@ -39,6 +41,14 @@ const AdminUsers = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
+
+  const getAuthorizationHeader = async () => {
+    const token = await getToken();
+    if (!token) {
+      throw new Error("Missing auth token");
+    }
+    return { Authorization: `Bearer ${token}` };
+  };
 
   // Guard: redirect if not admin
   useEffect(() => {
@@ -48,10 +58,15 @@ const AdminUsers = () => {
   }, [isLoadingMe, isAdmin, navigate]);
 
   const fetchUsers = async () => {
+    if (!isLoaded || !isSignedIn) {
+      setIsLoading(false);
+      return;
+    }
+
     try {
-      const token = await getToken();
-      const response = await fetch("http://localhost:8080/api/admin/users", {
-        headers: { Authorization: `Bearer ${token}` }
+      const headers = await getAuthorizationHeader();
+      const response = await fetch(`${API_BASE_URL}/api/admin/users`, {
+        headers,
       });
       if (!response.ok) throw new Error("Failed to fetch users");
       const data = await response.json();
@@ -69,16 +84,17 @@ const AdminUsers = () => {
   };
 
   useEffect(() => {
-    if (isAdmin) fetchUsers();
-  }, [isAdmin]);
+    if (isAdmin) {
+      fetchUsers();
+    }
+  }, [isAdmin, isLoaded, isSignedIn]);
 
   const handleDeleteUser = async (userId: string, username: string) => {
     if (!window.confirm(`Are you sure you want to permanently delete "${username}"? This will remove them from both the database and Clerk.`)) return;
     try {
-      const token = await getToken();
-      const response = await fetch(`http://localhost:8080/api/admin/users/${userId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/admin/users/${userId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` }
+        headers: await getAuthorizationHeader(),
       });
       if (!response.ok) throw new Error("Failed to delete user");
       toast({ title: "✅ User deleted", description: `"${username}" has been permanently removed.` });
@@ -90,11 +106,10 @@ const AdminUsers = () => {
 
   const handleRoleChange = async (userId: string, username: string, newRole: string) => {
     try {
-      const token = await getToken();
-      const response = await fetch(`http://localhost:8080/api/admin/users/${userId}/role`, {
+      const response = await fetch(`${API_BASE_URL}/api/admin/users/${userId}/role`, {
         method: "PATCH",
         headers: {
-          Authorization: `Bearer ${token}`,
+          ...(await getAuthorizationHeader()),
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ role: newRole })
