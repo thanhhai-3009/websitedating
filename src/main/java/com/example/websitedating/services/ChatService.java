@@ -3,18 +3,38 @@ import com.example.websitedating.constants.CommonEnums.DeliveryStatus;
 import com.example.websitedating.constants.CommonEnums.MessageType;
 import com.example.websitedating.dto.ChatMessage;
 import com.example.websitedating.models.Chat;
+import com.example.websitedating.models.User;
 import com.example.websitedating.repository.ChatRepository;
+import com.example.websitedating.repository.UserRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 @Service
 public class ChatService {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatService.class);
+
     private final ChatRepository chatRepository;
-    public ChatService(ChatRepository chatRepository) {
+    private final NotificationService notificationService;
+    private final UserRepository userRepository;
+    private final WebSocketPresenceService webSocketPresenceService;
+
+    public ChatService(
+            ChatRepository chatRepository,
+            NotificationService notificationService,
+            UserRepository userRepository,
+            WebSocketPresenceService webSocketPresenceService) {
         this.chatRepository = chatRepository;
+        this.notificationService = notificationService;
+        this.userRepository = userRepository;
+        this.webSocketPresenceService = webSocketPresenceService;
     }
+
     public ChatMessage saveIncomingMessage(ChatMessage incoming) {
         if (incoming == null || incoming.getRoomId() == null || incoming.getRoomId().isBlank()) {
             throw new IllegalArgumentException("roomId is required");
@@ -42,6 +62,9 @@ public class ChatService {
         chat.getMessages().add(message);
         chat.setLastMessageAt(timestamp);
         chatRepository.save(chat);
+
+        maybeCreateMessageNotification(chat, incoming, senderId);
+
         return ChatMessage.builder()
                 .id(UUID.randomUUID().toString())
                 .roomId(incoming.getRoomId())
@@ -98,5 +121,65 @@ public class ChatService {
             return ChatMessage.Type.IMAGE;
         }
         return ChatMessage.Type.CHAT;
+    }
+
+    private void maybeCreateMessageNotification(Chat chat, ChatMessage incoming, String senderId) {
+        try {
+            Optional<String> recipientOpt = resolveRecipientUserId(chat, senderId, incoming.getRoomId());
+            if (recipientOpt.isEmpty()) {
+                return;
+            }
+
+            String recipientUserId = recipientOpt.get();
+            if (recipientUserId.equals(senderId)) {
+                return;
+            }
+
+            Optional<User> recipientUserOpt = userRepository.findById(recipientUserId);
+            if (recipientUserOpt.isEmpty()) {
+                return;
+            }
+
+            String recipientClerkId = recipientUserOpt.get().getClerkId();
+            if (recipientClerkId != null
+                    && webSocketPresenceService.isUserActiveInRoom(recipientClerkId, incoming.getRoomId())) {
+                return;
+            }
+
+            notificationService.createMessageNotification(
+                    recipientUserId,
+                    senderId,
+                    incoming.getRoomId(),
+                    incoming.getContent());
+        } catch (Exception ex) {
+            log.warn("Failed to create message notification for room {}: {}", incoming.getRoomId(), ex.getMessage());
+        }
+    }
+
+    private Optional<String> resolveRecipientUserId(Chat chat, String senderId, String roomId) {
+        if (chat.getParticipants() != null && !chat.getParticipants().isEmpty()) {
+            return chat.getParticipants()
+                    .stream()
+                    .filter(participantId -> participantId != null && !participantId.isBlank())
+                    .filter(participantId -> !participantId.equals(senderId))
+                    .findFirst();
+        }
+
+        if (roomId == null || !roomId.startsWith("dm-")) {
+            return Optional.empty();
+        }
+
+        String[] ids = roomId.substring(3).split("-");
+        if (ids.length < 2) {
+            return Optional.empty();
+        }
+
+        if (ids[0].equals(senderId)) {
+            return Optional.of(ids[1]);
+        }
+        if (ids[1].equals(senderId)) {
+            return Optional.of(ids[0]);
+        }
+        return Optional.empty();
     }
 }

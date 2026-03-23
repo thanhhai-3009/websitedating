@@ -5,6 +5,7 @@ import com.example.websitedating.models.Notification;
 import com.example.websitedating.models.User;
 import com.example.websitedating.repository.NotificationRepository;
 import com.example.websitedating.repository.UserRepository;
+import org.springframework.messaging.simp.SimpMessageSendingOperations;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -17,10 +18,15 @@ public class NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
+    private final SimpMessageSendingOperations messageSendingOperations;
 
-    public NotificationService(NotificationRepository notificationRepository, UserRepository userRepository) {
+    public NotificationService(
+            NotificationRepository notificationRepository,
+            UserRepository userRepository,
+            SimpMessageSendingOperations messageSendingOperations) {
         this.notificationRepository = notificationRepository;
         this.userRepository = userRepository;
+        this.messageSendingOperations = messageSendingOperations;
     }
 
     public void createMatchNotification(String targetUserId, String matchedWithUserId) {
@@ -44,7 +50,39 @@ public class NotificationService {
                 .createdAt(Instant.now())
                 .build();
 
-        notificationRepository.save(notification);
+        persistAndPush(notification);
+        }
+
+        public void createMessageNotification(String targetUserId, String senderUserId, String roomId, String messageContent) {
+        User sender = userRepository.findById(senderUserId).orElse(null);
+        String senderName = sender != null && sender.getProfile() != null && sender.getProfile().getPersonalInfo() != null && sender.getProfile().getPersonalInfo().getName() != null
+            ? sender.getProfile().getPersonalInfo().getName()
+            : (sender != null ? sender.getUsername() : "Someone");
+        String senderAvatar = sender != null && sender.getProfile() != null ? sender.getProfile().getAvatarUrl() : "";
+
+        String normalizedContent = messageContent == null ? "" : messageContent.trim();
+        String preview = normalizedContent.isBlank() ? "sent you a message" : normalizedContent;
+        if (preview.length() > 80) {
+            preview = preview.substring(0, 77) + "...";
+        }
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("roomId", roomId);
+        data.put("senderUserId", senderUserId);
+        data.put("senderName", senderName);
+        data.put("senderAvatar", senderAvatar);
+        data.put("preview", preview);
+
+        Notification notification = Notification.builder()
+            .userId(targetUserId)
+            .type(NotificationType.new_message)
+            .content(senderName + ": " + preview)
+            .data(data)
+            .isRead(false)
+            .createdAt(Instant.now())
+            .build();
+
+        persistAndPush(notification);
     }
 
     public List<Notification> getUnreadNotifications(String clerkId) {
@@ -72,5 +110,17 @@ public class NotificationService {
 
         notification.setIsRead(true);
         notificationRepository.save(notification);
+    }
+
+    private void persistAndPush(Notification notification) {
+        Notification saved = notificationRepository.save(notification);
+
+        userRepository.findById(saved.getUserId())
+                .map(User::getClerkId)
+                .filter(clerkId -> clerkId != null && !clerkId.isBlank())
+                .ifPresent(clerkId -> messageSendingOperations.convertAndSendToUser(
+                        clerkId,
+                        "/queue/notifications",
+                        saved));
     }
 }
