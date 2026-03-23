@@ -4,6 +4,7 @@ import { useAuth } from "@clerk/clerk-react";
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client/dist/sockjs";
 import { toast } from "@/hooks/use-toast";
+import { getApiToken } from "@/lib/clerkToken";
 
 export interface NotificationData {
   matchedUserId?: string;
@@ -98,7 +99,7 @@ export function useNotifications() {
       reconnectDelay: 5000,
       debug: () => {},
       beforeConnect: async () => {
-        const token = await getToken();
+        const token = await getApiToken(getToken);
         if (!token) {
           throw new Error("Missing auth token");
         }

@@ -7,6 +7,7 @@ import { Navbar } from "@/components/layout/Navbar";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@clerk/clerk-react";
+import { getApiToken } from "@/lib/clerkToken";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 
@@ -58,7 +59,7 @@ const Payment = () => {
   const handleMomoCheckout = async () => {
     setIsProcessing(true);
     try {
-      const token = await getToken();
+      const token = await getApiToken(getToken);
       if (!token) {
         throw new Error("Missing auth token");
       }
