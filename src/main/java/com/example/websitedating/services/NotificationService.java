@@ -44,16 +44,40 @@ public class NotificationService {
         Notification notification = Notification.builder()
                 .userId(targetUserId)
                 .type(NotificationType.new_match)
-                .content("You have a new match with " + matchedUserName + "!")
+                .content("You are now matched with " + matchedUserName + ".")
                 .data(data)
                 .isRead(false)
                 .createdAt(Instant.now())
                 .build();
 
         persistAndPush(notification);
-        }
+    }
 
-        public void createMessageNotification(String targetUserId, String senderUserId, String roomId, String messageContent) {
+    public void createConnectionLikedNotification(String targetUserId, String likedByUserId) {
+        User likedByUser = userRepository.findById(likedByUserId).orElse(null);
+        String likedByUserName = likedByUser != null && likedByUser.getProfile() != null && likedByUser.getProfile().getPersonalInfo() != null && likedByUser.getProfile().getPersonalInfo().getName() != null
+                ? likedByUser.getProfile().getPersonalInfo().getName()
+                : (likedByUser != null ? likedByUser.getUsername() : "someone");
+        String avatarUrl = likedByUser != null && likedByUser.getProfile() != null ? likedByUser.getProfile().getAvatarUrl() : "";
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("likedByUserId", likedByUserId);
+        data.put("likedByUserName", likedByUserName);
+        data.put("likedByUserAvatar", avatarUrl);
+
+        Notification notification = Notification.builder()
+                .userId(targetUserId)
+                .type(NotificationType.connection_liked)
+                .content(likedByUserName + " liked your profile.")
+                .data(data)
+                .isRead(false)
+                .createdAt(Instant.now())
+                .build();
+
+        persistAndPush(notification);
+    }
+
+    public void createMessageNotification(String targetUserId, String senderUserId, String roomId, String messageContent) {
         User sender = userRepository.findById(senderUserId).orElse(null);
         String senderName = sender != null && sender.getProfile() != null && sender.getProfile().getPersonalInfo() != null && sender.getProfile().getPersonalInfo().getName() != null
             ? sender.getProfile().getPersonalInfo().getName()

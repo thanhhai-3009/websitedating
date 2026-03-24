@@ -237,18 +237,6 @@ export default function Discover() {
     });
   };
 
-  const handleLike = () => {
-    if (!currentCandidate) return;
-    markSeenIfNatural(currentCandidate.userId);
-    setDirection("right");
-    recordInteraction("like", "match_invite").catch(() => null);
-    toast({
-      title: "Invite sent to " + currentCandidate.displayName,
-      description: "Wait for them to accept your invite to become a match.",
-    });
-    nextCard();
-  };
-
   const handlePass = () => {
     if (!currentCandidate) return;
     markSeenIfNatural(currentCandidate.userId);
@@ -257,14 +245,14 @@ export default function Discover() {
     nextCard();
   };
 
-  const handleSuperLike = () => {
+  const handleMatch = () => {
     if (!currentCandidate) return;
     markSeenIfNatural(currentCandidate.userId);
     setDirection("right");
     recordInteraction("like", "match_invite").catch(() => null);
     toast({
-      title: "⭐ Super Like sent to " + currentCandidate.displayName + "!",
-      description: "They'll see you at the top of their list.",
+      title: "Match request sent to " + currentCandidate.displayName,
+      description: "They can match back from their Matches list.",
     });
     nextCard();
   };
@@ -335,9 +323,8 @@ export default function Discover() {
                   >
                     <ProfileCard
                       user={currentCard}
-                      onLike={handleLike}
+                      onMatch={handleMatch}
                       onPass={handlePass}
-                      onSuperLike={handleSuperLike}
                     />
                   </motion.div>
                 </AnimatePresence>
@@ -347,9 +334,8 @@ export default function Discover() {
 
           {/* Instructions */}
           <div className="flex items-center justify-center gap-8 text-sm text-muted-foreground mt-4">
-            <span>← Pass</span>
-            <span>⭐ Super Like</span>
-            <span>Like →</span>
+            <span>Pass</span>
+            <span>Match</span>
           </div>
         </div>
       </div>
