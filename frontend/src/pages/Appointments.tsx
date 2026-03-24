@@ -43,6 +43,31 @@ const Appointments = () => {
   const { toast } = useToast();
   const { user } = useUser();
 
+      // collect participantIds that are missing from matchLookup
+      const participantIds = Array.from(new Set((data || []).map((it:any) => it.participantId ? String(it.participantId) : null).filter(Boolean)));
+      const missing = participantIds.filter(pid => !matchLookup.has(pid));
+      if (missing.length > 0) {
+        try {
+          // fetch profiles for missing ids in parallel
+          const profiles = await Promise.all(missing.map(async (pid) => {
+            try {
+              const r = await fetch(`/api/users/profile/${encodeURIComponent(pid)}`);
+              if (!r.ok) return null;
+              return await r.json();
+            } catch (e) {
+              return null;
+            }
+          }));
+          profiles.forEach((p:any, idx:number) => {
+            const pid = missing[idx];
+            if (p && pid) {
+              matchLookup.set(pid, p.displayName || p.name || pid);
+            }
+          });
+        } catch (e) {
+          console.error('Could not resolve participant profiles', e);
+        }
+      }
   const fetchAppointments = async () => {
     const clerkId = user?.id;
     if (!clerkId) return;
