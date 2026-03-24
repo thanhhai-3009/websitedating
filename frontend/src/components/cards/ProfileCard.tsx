@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Heart, X, Star, MapPin, Verified } from "lucide-react";
+import { HeartHandshake, X, MapPin, Verified } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -16,17 +16,15 @@ interface ProfileCardProps {
     verified: boolean;
     distance?: string;
   };
-  onLike?: () => void;
+  onMatch?: () => void;
   onPass?: () => void;
-  onSuperLike?: () => void;
   className?: string;
 }
 
 export const ProfileCard = ({
   user,
-  onLike,
+  onMatch,
   onPass,
-  onSuperLike,
   className,
 }: ProfileCardProps) => {
   return (
@@ -93,20 +91,13 @@ export const ProfileCard = ({
           <X className="w-7 h-7" />
         </Button>
         <Button
-          size="icon"
-          variant="gold"
-          className="w-12 h-12 rounded-full shadow-lg"
-          onClick={onSuperLike}
-        >
-          <Star className="w-6 h-6" />
-        </Button>
-        <Button
-          size="icon"
+          size="default"
           variant="gradient"
-          className="w-14 h-14 rounded-full shadow-lg"
-          onClick={onLike}
+          className="h-12 px-6 rounded-full shadow-lg gap-2"
+          onClick={onMatch}
         >
-          <Heart className="w-7 h-7" />
+          <HeartHandshake className="w-5 h-5" />
+          Match
         </Button>
       </div>
     </motion.div>

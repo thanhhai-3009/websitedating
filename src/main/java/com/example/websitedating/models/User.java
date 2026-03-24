@@ -5,7 +5,7 @@ import lombok.*;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
-import org.springframework.data.geo.Point;
+import org.springframework.data.mongodb.core.geo.GeoJsonPoint;
 import org.springframework.data.mongodb.core.index.*;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -43,6 +43,13 @@ public class User {
     @Builder.Default
     private Boolean isVerified = false;
 
+    @Builder.Default
+    private String role = "USER";
+
+    private String premiumPlan;
+
+    private Instant premiumExpiresAt;
+
     private Profile profile;
     private Preferences preferences;
     private BehaviorSignals behaviorSignals;
@@ -64,6 +71,8 @@ public class User {
         private String avatarUrl = "";
         @Builder.Default
         private String bio = "";
+        @Builder.Default
+        private List<String> photos = List.of();
         private PersonalInfo personalInfo;
         private List<String> interests;
     }
@@ -80,7 +89,7 @@ public class User {
         private String locationText;
 
         @GeoSpatialIndexed(type = GeoSpatialIndexType.GEO_2DSPHERE)
-        private Point location; // longitude, latitude
+        private GeoJsonPoint location; // longitude, latitude
 
         private String region;
     }
@@ -161,6 +170,10 @@ public class User {
         private Boolean online = false;
         @Builder.Default
         private Instant lastSeen = Instant.now();
+    }
+
+    public boolean hasActivePremium() {
+        return premiumExpiresAt != null && premiumExpiresAt.isAfter(Instant.now());
     }
 }
 

@@ -1,8 +1,7 @@
 package com.example.websitedating.dto;
 
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.*;
+
 import java.util.List;
 
 public class OnboardingRequest {
@@ -14,6 +13,9 @@ public class OnboardingRequest {
     @Email(message = "Email is invalid")
     @NotBlank(message = "Email is required")
     private String email;
+
+    @Pattern(regexp = "^\\+?[0-9]{8,15}$", message = "Phone number is invalid")
+    private String phone;
 
     @Size(max = 120, message = "First name is too long")
     private String firstName;
@@ -36,7 +38,17 @@ public class OnboardingRequest {
     @Size(max = 255, message = "Location is too long")
     private String location;
 
+    @DecimalMin(value = "-180.0", message = "Longitude must be >= -180")
+    @DecimalMax(value = "180.0", message = "Longitude must be <= 180")
+    private Double longitude;
+
+    @DecimalMin(value = "-90.0", message = "Latitude must be >= -90")
+    @DecimalMax(value = "90.0", message = "Latitude must be <= 90")
+    private Double latitude;
+
     private List<String> interests;
+
+    private List<String> photos;
 
     @Size(max = 500, message = "Bio is too long")
     private String bio;
@@ -55,6 +67,14 @@ public class OnboardingRequest {
 
     public void setEmail(String email) {
         this.email = email;
+    }
+
+    public String getPhone() {
+        return phone;
+    }
+
+    public void setPhone(String phone) {
+        this.phone = phone;
     }
 
     public String getFirstName() {
@@ -113,12 +133,36 @@ public class OnboardingRequest {
         this.location = location;
     }
 
+    public Double getLongitude() {
+        return longitude;
+    }
+
+    public void setLongitude(Double longitude) {
+        this.longitude = longitude;
+    }
+
+    public Double getLatitude() {
+        return latitude;
+    }
+
+    public void setLatitude(Double latitude) {
+        this.latitude = latitude;
+    }
+
     public List<String> getInterests() {
         return interests;
     }
 
     public void setInterests(List<String> interests) {
         this.interests = interests;
+    }
+
+    public List<String> getPhotos() {
+        return photos;
+    }
+
+    public void setPhotos(List<String> photos) {
+        this.photos = photos;
     }
 
     public String getBio() {

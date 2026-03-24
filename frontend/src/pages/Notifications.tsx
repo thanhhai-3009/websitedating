@@ -1,70 +1,23 @@
 import { motion } from "framer-motion";
-import { Bell, Heart, MessageCircle, Calendar, Star, UserCheck, Settings } from "lucide-react";
+import { Bell, Heart, MessageCircle, Calendar, Star, Settings } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-
-const mockNotifications = [
-  {
-    id: "1",
-    type: "match",
-    icon: Heart,
-    title: "New Match!",
-    message: "You and Emma matched! Start the conversation now.",
-    time: "2 min ago",
-    read: false,
-    image: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=80&h=80&fit=crop",
-  },
-  {
-    id: "2",
-    type: "message",
-    icon: MessageCircle,
-    title: "New Message",
-    message: "Sophia sent you a message: \"Hey! How's your day going?\"",
-    time: "15 min ago",
-    read: false,
-    image: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=80&h=80&fit=crop",
-  },
-  {
-    id: "3",
-    type: "like",
-    icon: Star,
-    title: "Someone Likes You!",
-    message: "Someone new liked your profile. Upgrade to see who!",
-    time: "1 hour ago",
-    read: true,
-    image: null,
-  },
-  {
-    id: "4",
-    type: "appointment",
-    icon: Calendar,
-    title: "Date Reminder",
-    message: "You have a date with Olivia tomorrow at 7 PM.",
-    time: "3 hours ago",
-    read: true,
-    image: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=80&h=80&fit=crop",
-  },
-  {
-    id: "5",
-    type: "verification",
-    icon: UserCheck,
-    title: "Profile Verified!",
-    message: "Your email has been verified. Your profile now shows a verified badge.",
-    time: "1 day ago",
-    read: true,
-    image: null,
-  },
-];
-
+import { useNotifications, AppNotification } from "@/hooks/useNotifications";
+import { formatDistanceToNow } from "date-fns";
+import { useNavigate } from "react-router-dom";
 const getIconColor = (type: string) => {
   switch (type) {
+    case "new_match":
     case "match":
       return "bg-primary text-primary-foreground";
+    case "new_message":
     case "message":
       return "bg-blue-500 text-white";
+    case "connection_liked":
     case "like":
       return "bg-gold text-white";
+    case "upcoming_appointment":
     case "appointment":
       return "bg-success text-white";
     case "verification":
@@ -74,8 +27,55 @@ const getIconColor = (type: string) => {
   }
 };
 
+const getNotificationIcon = (type: string) => {
+  switch (type) {
+    case "new_match": return Heart;
+    case "new_message": return MessageCircle;
+    case "connection_liked": return Star;
+    case "upcoming_appointment": return Calendar;
+    default: return Bell;
+  }
+};
+
 export default function Notifications() {
-  const unreadCount = mockNotifications.filter((n) => !n.read).length;
+  const navigate = useNavigate();
+  const { allNotifications, unreadNotifications, isLoadingAll, markAsRead } = useNotifications();
+  const unreadCount = unreadNotifications.length;
+
+  const handleNotificationClick = (n: AppNotification) => {
+    if (!n.isRead) {
+      markAsRead.mutate(n.id);
+    }
+
+    if (n.type === "new_message" && n.data?.senderUserId) {
+      navigate("/messages", {
+        state: {
+          selectedConversationId: n.data.senderUserId,
+        },
+      });
+    }
+  };
+
+  const mappedNotifications = allNotifications.map((n) => {
+    const Icon = getNotificationIcon(n.type);
+    const titleByType: Record<string, string> = {
+      new_match: "New Match",
+      connection_liked: "New Like",
+      new_message: "New Message",
+    };
+
+    return {
+      id: n.id,
+      original: n,
+      type: n.type,
+      icon: Icon,
+      title: titleByType[n.type] || n.type.replace("_", " ").toUpperCase(),
+      message: n.content,
+      time: formatDistanceToNow(new Date(n.createdAt), { addSuffix: true }),
+      read: n.isRead,
+      image: n.data?.matchedUserAvatar || n.data?.likedByUserAvatar || n.data?.senderAvatar || null,
+    };
+  });
 
   return (
     <Layout isAuthenticated>
@@ -89,7 +89,11 @@ export default function Notifications() {
                 Notifications
               </h1>
               <p className="text-muted-foreground mt-1">
-                {unreadCount > 0 ? `${unreadCount} new notifications` : "You're all caught up!"}
+                {isLoadingAll
+                  ? "Loading..."
+                  : unreadCount > 0
+                  ? `${unreadCount} new notifications`
+                  : "You're all caught up!"}
               </p>
             </div>
             <Button variant="ghost" size="icon">
@@ -99,7 +103,7 @@ export default function Notifications() {
 
           {/* Notifications List */}
           <div className="space-y-3">
-            {mockNotifications.map((notification, i) => {
+            {mappedNotifications.map((notification, i) => {
               const Icon = notification.icon;
               return (
                 <motion.div
@@ -107,6 +111,7 @@ export default function Notifications() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
+                  onClick={() => handleNotificationClick(notification.original)}
                   className={cn(
                     "p-4 rounded-2xl flex items-start gap-4 cursor-pointer transition-colors",
                     notification.read
@@ -165,7 +170,7 @@ export default function Notifications() {
           </div>
 
           {/* Empty State */}
-          {mockNotifications.length === 0 && (
+          {!isLoadingAll && mappedNotifications.length === 0 && (
             <div className="text-center py-16">
               <div className="w-20 h-20 rounded-full bg-secondary flex items-center justify-center mx-auto mb-4">
                 <Bell className="w-10 h-10 text-muted-foreground" />

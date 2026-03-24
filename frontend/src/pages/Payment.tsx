@@ -1,13 +1,15 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, CreditCard, Lock, Check, Crown, Sparkles } from "lucide-react";
+import { ArrowLeft, Smartphone, Lock, Check, Crown, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Navbar } from "@/components/layout/Navbar";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@clerk/clerk-react";
+import { getApiToken } from "@/lib/clerkToken";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 
 const planDetails = {
   gold: {
@@ -26,65 +28,65 @@ const planDetails = {
   },
 };
 
+const normalizePlanId = (value: string | null): keyof typeof planDetails => {
+  const plan = (value || "").trim().toLowerCase();
+  if (plan === "platinum") {
+    return "platinum";
+  }
+  return "gold";
+};
+
 const Payment = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
-  const planId = searchParams.get("plan") as keyof typeof planDetails || "gold";
+  const { getToken } = useAuth();
+  const planId = normalizePlanId(searchParams.get("plan"));
   const plan = planDetails[planId] || planDetails.gold;
+  const momoStatus = searchParams.get("momoStatus");
+  const momoMessage = searchParams.get("momoMessage");
+  const orderId = searchParams.get("orderId");
 
-  const [formData, setFormData] = useState({
-    cardNumber: "",
-    cardName: "",
-    expiry: "",
-    cvv: "",
-  });
+  const paymentResult = useMemo(() => {
+    if (!momoStatus) return null;
+    return {
+      success: momoStatus === "success",
+      message: momoMessage || (momoStatus === "success" ? "Payment completed successfully." : "Payment was not completed."),
+    };
+  }, [momoMessage, momoStatus]);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const formatCardNumber = (value: string) => {
-    const v = value.replace(/\s+/g, "").replace(/[^0-9]/gi, "");
-    const matches = v.match(/\d{4,16}/g);
-    const match = (matches && matches[0]) || "";
-    const parts = [];
-    for (let i = 0, len = match.length; i < len; i += 4) {
-      parts.push(match.substring(i, i + 4));
-    }
-    return parts.length ? parts.join(" ") : value;
-  };
-
-  const formatExpiry = (value: string) => {
-    const v = value.replace(/\s+/g, "").replace(/[^0-9]/gi, "");
-    if (v.length >= 2) {
-      return v.substring(0, 2) + "/" + v.substring(2, 4);
-    }
-    return v;
-  };
-
-  const handleInputChange = (field: string, value: string) => {
-    if (field === "cardNumber") {
-      value = formatCardNumber(value);
-    } else if (field === "expiry") {
-      value = formatExpiry(value.replace("/", ""));
-    } else if (field === "cvv") {
-      value = value.replace(/[^0-9]/g, "").substring(0, 4);
-    }
-    setFormData((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleMomoCheckout = async () => {
     setIsProcessing(true);
-    
-    // Simulate payment processing
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    
-    toast({
-      title: "Payment Successful! 🎉",
-      description: `Welcome to ${plan.name}! Your premium features are now active.`,
-    });
-    
-    setIsProcessing(false);
-    navigate("/discover");
+    try {
+      const token = await getApiToken(getToken);
+      if (!token) {
+        throw new Error("Missing auth token");
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/payments/momo/create`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ planId }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as { message?: string; payUrl?: string };
+      if (!response.ok || !payload.payUrl) {
+        throw new Error(payload.message || "Unable to initialize MoMo payment.");
+      }
+
+      window.location.assign(payload.payUrl);
+    } catch (error) {
+      toast({
+        title: "Payment initialization failed",
+        description: error instanceof Error ? error.message : "Unable to initialize MoMo payment.",
+        variant: "destructive",
+      });
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -173,101 +175,60 @@ const Payment = () => {
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <CreditCard className="w-5 h-5" />
-                    Payment Details
+                    <Smartphone className="w-5 h-5" />
+                    MoMo Payment
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <form onSubmit={handleSubmit} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="cardNumber">Card Number</Label>
-                      <Input
-                        id="cardNumber"
-                        placeholder="1234 5678 9012 3456"
-                        value={formData.cardNumber}
-                        onChange={(e) => handleInputChange("cardNumber", e.target.value)}
-                        maxLength={19}
-                        required
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="cardName">Cardholder Name</Label>
-                      <Input
-                        id="cardName"
-                        placeholder="John Doe"
-                        value={formData.cardName}
-                        onChange={(e) => handleInputChange("cardName", e.target.value)}
-                        required
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="expiry">Expiry Date</Label>
-                        <Input
-                          id="expiry"
-                          placeholder="MM/YY"
-                          value={formData.expiry}
-                          onChange={(e) => handleInputChange("expiry", e.target.value)}
-                          maxLength={5}
-                          required
-                        />
+                  <div className="space-y-4">
+                    {paymentResult && (
+                      <div
+                        className={`rounded-lg border px-4 py-3 text-sm ${
+                          paymentResult.success
+                            ? "border-green-500/40 bg-green-500/10 text-green-700"
+                            : "border-destructive/40 bg-destructive/10 text-destructive"
+                        }`}
+                      >
+                        <p className="font-medium">
+                          {paymentResult.success ? "Payment successful" : "Payment failed"}
+                        </p>
+                        <p>{paymentResult.message}</p>
+                        {orderId && <p className="mt-1 text-xs">Order: {orderId}</p>}
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="cvv">CVV</Label>
-                        <Input
-                          id="cvv"
-                          type="password"
-                          placeholder="123"
-                          value={formData.cvv}
-                          onChange={(e) => handleInputChange("cvv", e.target.value)}
-                          maxLength={4}
-                          required
-                        />
-                      </div>
-                    </div>
+                    )}
 
-                    {/* Card Icons */}
-                    <div className="flex items-center gap-2 py-2">
-                      <div className="flex gap-1">
-                        <div className="w-10 h-6 bg-gradient-to-r from-blue-600 to-blue-800 rounded text-white text-[8px] flex items-center justify-center font-bold">VISA</div>
-                        <div className="w-10 h-6 bg-gradient-to-r from-red-500 to-yellow-500 rounded flex items-center justify-center">
-                          <div className="flex -space-x-1">
-                            <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                            <div className="w-3 h-3 rounded-full bg-yellow-400"></div>
-                          </div>
-                        </div>
-                        <div className="w-10 h-6 bg-gradient-to-r from-blue-400 to-blue-600 rounded text-white text-[6px] flex items-center justify-center font-bold">AMEX</div>
-                      </div>
-                      <span className="text-xs text-muted-foreground ml-auto">We accept all major cards</span>
+                    <div className="rounded-lg border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
+                      You will be redirected to MoMo to complete your payment securely.
                     </div>
 
                     <Button
-                      type="submit"
                       variant="gradient"
                       size="lg"
                       className="w-full"
                       disabled={isProcessing}
+                      onClick={handleMomoCheckout}
                     >
                       {isProcessing ? (
                         <div className="flex items-center gap-2">
                           <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          Processing...
+                          Redirecting to MoMo...
                         </div>
                       ) : (
                         <>
-                          <Lock className="w-4 h-4 mr-2" />
-                          Pay ${plan.price.toFixed(2)}
+                          <Smartphone className="w-4 h-4 mr-2" />
+                          Pay with MoMo
                         </>
                       )}
                     </Button>
 
+                    {paymentResult?.success && (
+                      <Button variant="outline" className="w-full" onClick={() => navigate("/discover")}>Continue to Discover</Button>
+                    )}
+
                     <p className="text-xs text-center text-muted-foreground">
                       By confirming, you agree to our Terms of Service and authorize this recurring charge.
-                      Cancel anytime.
                     </p>
-                  </form>
+                  </div>
                 </CardContent>
               </Card>
             </motion.div>

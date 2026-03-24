@@ -1,98 +1,155 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Heart, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useUser } from "@clerk/clerk-react";
 import { Layout } from "@/components/layout/Layout";
 import { MatchCard } from "@/components/cards/MatchCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const mockMatches = [
-  {
-    id: "1",
-    name: "Emma",
-    age: 26,
-    image: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop",
-    lastActive: "2 min ago",
-    isOnline: true,
-    isNew: true,
-  },
-  {
-    id: "2",
-    name: "Sophia",
-    age: 24,
-    image: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=200&h=200&fit=crop",
-    lastActive: "1 hour ago",
-    isOnline: false,
-    isNew: true,
-  },
-  {
-    id: "3",
-    name: "Olivia",
-    age: 28,
-    image: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop",
-    lastActive: "3 hours ago",
-    isOnline: true,
-    isNew: false,
-  },
-  {
-    id: "4",
-    name: "Ava",
-    age: 25,
-    image: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=200&h=200&fit=crop",
-    lastActive: "Yesterday",
-    isOnline: false,
-    isNew: false,
-  },
-  {
-    id: "5",
-    name: "Mia",
-    age: 27,
-    image: "https://images.unsplash.com/photo-1488426862026-3ee34a7d66df?w=200&h=200&fit=crop",
-    lastActive: "2 days ago",
-    isOnline: false,
-    isNew: false,
-  },
-  {
-    id: "6",
-    name: "Isabella",
-    age: 23,
-    image: "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=200&h=200&fit=crop",
-    lastActive: "Online now",
-    isOnline: true,
-    isNew: false,
-  },
-];
+type DiscoverCandidate = {
+  userId: string;
+  displayName: string;
+  age?: number;
+  avatarUrl?: string;
+  online?: boolean;
+  matchedAt?: string;
+  status?: string;
+  likedByMe?: boolean;
+};
 
-const mockLikes = [
-  {
-    id: "7",
-    name: "Charlotte",
-    age: 26,
-    image: "https://images.unsplash.com/photo-1502823403499-6ccfcf4fb453?w=200&h=200&fit=crop",
-    lastActive: "1 hour ago",
-    isOnline: false,
-    isNew: true,
-  },
-  {
-    id: "8",
-    name: "Amelia",
-    age: 25,
-    image: "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=200&h=200&fit=crop",
-    lastActive: "2 hours ago",
-    isOnline: true,
-    isNew: true,
-  },
-];
+type MatchViewModel = {
+  id: string;
+  name: string;
+  age: number;
+  image: string;
+  lastActive?: string;
+  isOnline?: boolean;
+  status: "liked" | "matched" | "accepted";
+  likedByMe: boolean;
+  isNew: boolean;
+};
 
 export default function Matches() {
+  const { user } = useUser();
   const navigate = useNavigate();
+  const [matches, setMatches] = useState<MatchViewModel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState("");
+  const [promotingUserId, setPromotingUserId] = useState<string | null>(null);
 
-  const handleMessage = (userId: string) => {
-    navigate("/messages");
+  useEffect(() => {
+    const clerkId = user?.id;
+    if (!clerkId) {
+      setMatches([]);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchMatches = async () => {
+      setLoading(true);
+      setFetchError("");
+
+      try {
+        const response = await fetch(`/api/discovery/matches?clerkId=${encodeURIComponent(clerkId)}&limit=50&includeLiked=true&includeSentLiked=true`);
+        if (!response.ok) {
+          const data = (await response.json().catch(() => ({}))) as { message?: string };
+          if (!cancelled) {
+            setFetchError(data.message || "Failed to load matches");
+            setMatches([]);
+          }
+          return;
+        }
+
+        const toStatus = (value?: string): MatchViewModel["status"] => {
+          if (value === "accepted") return "accepted";
+          if (value === "matched") return "matched";
+          return "liked";
+        };
+
+        const data = (await response.json()) as DiscoverCandidate[];
+        const mapped = data.map((candidate, index) => ({
+          id: candidate.userId,
+          name: candidate.displayName,
+          age: candidate.age ?? 18,
+          image:
+            candidate.avatarUrl && candidate.avatarUrl.trim().length > 0
+              ? candidate.avatarUrl
+              : "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop",
+          lastActive: candidate.online ? "Online now" : "Recently active",
+          isOnline: Boolean(candidate.online),
+          status: toStatus(candidate.status),
+          likedByMe: Boolean(candidate.likedByMe),
+          isNew:
+            typeof candidate.matchedAt === "string"
+              ? Date.now() - new Date(candidate.matchedAt).getTime() < 3 * 24 * 60 * 60 * 1000
+              : index < 6,
+        }));
+
+        if (!cancelled) {
+          setMatches(mapped);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setFetchError(error instanceof Error ? error.message : "Failed to load matches");
+          setMatches([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchMatches();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  const handleMessageForUser = (targetUserId: string) => {
+    navigate("/messages", {
+      state: { selectedConversationId: targetUserId },
+    });
   };
 
-  const newMatches = mockMatches.filter((m) => m.isNew);
-  const allMatches = mockMatches.filter((m) => !m.isNew);
+  const handlePromoteToMatch = async (targetUserId: string) => {
+    if (!user?.id) return;
+    setPromotingUserId(targetUserId);
+    try {
+      const response = await fetch("/api/discovery/connections/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clerkId: user.id,
+          targetUserId,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { message?: string };
+        throw new Error(data.message || "Failed to confirm match");
+      }
+
+      setMatches((prev) =>
+        prev.map((item) =>
+          item.id === targetUserId ? { ...item, status: "matched", isNew: true, lastActive: "Recently matched" } : item
+        )
+      );
+    } catch (error) {
+      setFetchError(error instanceof Error ? error.message : "Failed to confirm match");
+    } finally {
+      setPromotingUserId(null);
+    }
+  };
+
+  const likedYou = useMemo(() => matches.filter((m) => m.status === "liked" && !m.likedByMe), [matches]);
+  const pendingSentInvites = useMemo(() => matches.filter((m) => m.status === "liked" && m.likedByMe), [matches]);
+  const newMatches = useMemo(() => matches.filter((m) => m.status !== "liked" && m.isNew), [matches]);
+  const allMatches = useMemo(() => matches.filter((m) => m.status !== "liked" && !m.isNew), [matches]);
 
   return (
     <Layout isAuthenticated>
@@ -110,20 +167,56 @@ export default function Matches() {
           </div>
 
           <Tabs defaultValue="matches" className="space-y-6">
-            <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsList className="grid w-full max-w-2xl grid-cols-3">
               <TabsTrigger value="matches" className="gap-2">
                 <Heart className="w-4 h-4" />
-                Matches ({mockMatches.length})
+                Matches ({newMatches.length + allMatches.length})
               </TabsTrigger>
               <TabsTrigger value="likes" className="gap-2">
                 <Sparkles className="w-4 h-4" />
-                Likes ({mockLikes.length})
+                Likes ({likedYou.length})
+              </TabsTrigger>
+              <TabsTrigger value="sent" className="gap-2">
+                <Sparkles className="w-4 h-4" />
+                Sent ({pendingSentInvites.length})
               </TabsTrigger>
             </TabsList>
 
             <TabsContent value="matches" className="space-y-8">
+              {loading && <p className="text-center text-muted-foreground">Loading matches...</p>}
+              {!loading && fetchError && <p className="text-center text-destructive">{fetchError}</p>}
+              {!loading && !fetchError && matches.length === 0 && (
+                <p className="text-center text-muted-foreground">No matches yet. Keep discovering people to get more matches.</p>
+              )}
+
+              {!loading && !fetchError && likedYou.length > 0 && (
+                <section>
+                  <h2 className="font-serif text-xl font-semibold text-foreground mb-4 flex items-center gap-2">
+                    <Heart className="w-5 h-5 text-primary" />
+                    Likes You
+                  </h2>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                    {likedYou.map((match, i) => (
+                      <motion.div
+                        key={match.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.1 }}
+                      >
+                        <MatchCard
+                          user={match}
+                          actionLabel={promotingUserId === match.id ? "Matching..." : "Accept"}
+                          actionDisabled={promotingUserId === match.id}
+                          onAction={() => handlePromoteToMatch(match.id)}
+                        />
+                      </motion.div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               {/* New Matches */}
-              {newMatches.length > 0 && (
+              {!loading && !fetchError && newMatches.length > 0 && (
                 <section>
                   <h2 className="font-serif text-xl font-semibold text-foreground mb-4 flex items-center gap-2">
                     <Sparkles className="w-5 h-5 text-gold" />
@@ -140,7 +233,7 @@ export default function Matches() {
                         <MatchCard
                           user={match}
                           isNew
-                          onMessage={() => handleMessage(match.id)}
+                          onAction={handleMessageForUser}
                         />
                       </motion.div>
                     ))}
@@ -149,12 +242,39 @@ export default function Matches() {
               )}
 
               {/* All Matches */}
-              <section>
-                <h2 className="font-serif text-xl font-semibold text-foreground mb-4">
-                  All Matches
-                </h2>
+              {!loading && !fetchError && allMatches.length > 0 && (
+                <section>
+                  <h2 className="font-serif text-xl font-semibold text-foreground mb-4">
+                    All Matches
+                  </h2>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                    {allMatches.map((match, i) => (
+                      <motion.div
+                        key={match.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.05 }}
+                      >
+                        <MatchCard
+                          user={match}
+                          onAction={handleMessageForUser}
+                        />
+                      </motion.div>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </TabsContent>
+
+            <TabsContent value="likes">
+              {loading && <p className="text-center text-muted-foreground">Loading likes...</p>}
+              {!loading && fetchError && <p className="text-center text-destructive">{fetchError}</p>}
+              {!loading && !fetchError && likedYou.length === 0 && (
+                <p className="text-center text-muted-foreground">No one has liked you yet.</p>
+              )}
+              {!loading && !fetchError && likedYou.length > 0 && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                  {allMatches.map((match, i) => (
+                  {likedYou.map((match, i) => (
                     <motion.div
                       key={match.id}
                       initial={{ opacity: 0, y: 20 }}
@@ -163,42 +283,45 @@ export default function Matches() {
                     >
                       <MatchCard
                         user={match}
-                        onMessage={() => handleMessage(match.id)}
+                        actionLabel={promotingUserId === match.id ? "Matching..." : "Accept"}
+                        actionDisabled={promotingUserId === match.id}
+                        onAction={() => handlePromoteToMatch(match.id)}
                       />
                     </motion.div>
                   ))}
                 </div>
-              </section>
+              )}
             </TabsContent>
 
-            <TabsContent value="likes">
-              <div className="text-center py-12">
-                <div className="w-20 h-20 rounded-full gradient-gold flex items-center justify-center mx-auto mb-4">
-                  <Sparkles className="w-10 h-10 text-primary-foreground" />
+            <TabsContent value="sent">
+              {loading && <p className="text-center text-muted-foreground">Loading sent invites...</p>}
+              {!loading && fetchError && <p className="text-center text-destructive">{fetchError}</p>}
+              {!loading && !fetchError && pendingSentInvites.length === 0 && (
+                <p className="text-center text-muted-foreground">You have no pending invites right now.</p>
+              )}
+              {!loading && !fetchError && pendingSentInvites.length > 0 && (
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    These users received your match request and are waiting to accept.
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                    {pendingSentInvites.map((match, i) => (
+                      <motion.div
+                        key={match.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.05 }}
+                      >
+                        <MatchCard
+                          user={match}
+                          actionLabel="Pending"
+                          actionDisabled
+                        />
+                      </motion.div>
+                    ))}
+                  </div>
                 </div>
-                <h3 className="font-serif text-2xl font-semibold text-foreground mb-2">
-                  {mockLikes.length} people like you
-                </h3>
-                <p className="text-muted-foreground max-w-md mx-auto mb-6">
-                  Upgrade to Premium to see who likes you and match with them instantly
-                </p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 max-w-2xl mx-auto">
-                  {mockLikes.map((like) => (
-                    <div key={like.id} className="relative">
-                      <img
-                        src={like.image}
-                        alt={like.name}
-                        className="w-full aspect-square rounded-2xl object-cover blur-lg"
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="w-12 h-12 rounded-full gradient-gold flex items-center justify-center">
-                          <Heart className="w-6 h-6 text-primary-foreground" />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              )}
             </TabsContent>
           </Tabs>
         </div>

@@ -35,8 +35,25 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/register", "/api/auth/login", "/error")
+                    .requestMatchers(
+                        "/ws/**",
+                        "/api/auth/register",
+                        "/api/auth/login",
+                        "/api/users/onboarding",
+                        "/api/users/profile/**",
+                        "/api/users/resolve/**",
+                        "/api/uploads/photos",
+                        "/api/files/upload",
+                        "/api/discovery/**",
+                        "/api/chats/**",
+                        "/api/appointments/**",
+                        "/api/notifications/**",
+                        "/api/payments/momo/return",
+                        "/api/payments/momo/ipn",
+                        "/uploads/**",
+                        "/error")
                         .permitAll()
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest()
                         .authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
@@ -57,7 +74,7 @@ public class SecurityConfig {
                 .filter(value -> !value.isBlank())
                 .toList());
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type"));
+        configuration.setAllowedHeaders(Arrays.asList("*"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -65,4 +82,3 @@ public class SecurityConfig {
         return source;
     }
 }
-

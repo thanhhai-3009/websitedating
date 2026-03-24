@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { format } from "date-fns";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,11 +9,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { CalendarDays, Clock, MapPin, MessageCircle, Star, Trash2, Edit, Plus } from "lucide-react";
 import { motion } from "framer-motion";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { useUser } from "@clerk/clerk-react";
 
 interface Appointment {
-  id: number;
+  id: string;
   matchName: string;
   matchInitials: string;
   spot: string;
@@ -23,12 +25,7 @@ interface Appointment {
   note?: string;
 }
 
-const appointments: Appointment[] = [
-  { id: 1, matchName: "Emma W.", matchInitials: "EW", spot: "Sunset Rooftop Lounge", location: "Downtown", date: "Mar 20, 2026", time: "7:00 PM", status: "confirmed", note: "Looking forward to it!" },
-  { id: 2, matchName: "Sophie L.", matchInitials: "SL", spot: "The Cozy Bean Café", location: "Midtown", date: "Mar 22, 2026", time: "2:00 PM", status: "pending" },
-  { id: 3, matchName: "Olivia M.", matchInitials: "OM", spot: "Botanical Gardens Walk", location: "Westside Park", date: "Mar 10, 2026", time: "10:00 AM", status: "completed" },
-  { id: 4, matchName: "Isabella R.", matchInitials: "IR", spot: "Bella Italia Trattoria", location: "Little Italy", date: "Mar 5, 2026", time: "8:00 PM", status: "cancelled" },
-];
+// will be fetched from API
 
 const statusConfig: Record<string, { label: string; className: string }> = {
   confirmed: { label: "Confirmed", className: "bg-success/10 text-success border-success/20" },
@@ -38,15 +35,104 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 };
 
 const Appointments = () => {
-  const [cancelId, setCancelId] = useState<number | null>(null);
+  const navigate = useNavigate();
+  const [cancelId, setCancelId] = useState<string | null>(null);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [matchedUsers, setMatchedUsers] = useState<Array<any>>([]);
+  const [editAptRaw, setEditAptRaw] = useState<any | null>(null);
+  const [editParticipantName, setEditParticipantName] = useState<string | null>(null);
+  const [editUiStatus, setEditUiStatus] = useState<string>("pending");
   const { toast } = useToast();
+  const { user } = useUser();
+
+  const fetchAppointments = async () => {
+    const clerkId = user?.id;
+    if (!clerkId) return;
+    try {
+      const res = await fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`);
+      if (!res.ok) throw new Error('Failed to fetch');
+      const data = await res.json();
+      // also fetch matched users so we can resolve participantId -> display name
+          let mdata: any[] = [];
+          try {
+            const mres = await fetch(`/api/discovery/matches?clerkId=${encodeURIComponent(clerkId)}&limit=200`);
+            if (mres.ok) {
+              mdata = await mres.json();
+              setMatchedUsers(mdata || []);
+            }
+          } catch (e) {
+            console.error('Could not load matches', e);
+          }
+
+      // normalize server shape to UI shape
+      const mapBackendToUI = (s: any) => {
+        if (!s) return 'pending';
+        const st = String(s).toLowerCase();
+        switch (st) {
+          case 'scheduled':
+            return 'confirmed';
+          case 'proposed':
+            return 'pending';
+          case 'canceled':
+          case 'cancelled':
+            return 'cancelled';
+          case 'completed':
+            return 'completed';
+          case 'pending':
+          case 'confirmed':
+            return st;
+          default:
+            return st;
+        }
+      };
+
+      // build a quick lookup from matchedUsers returned above
+          // build a quick lookup from matches we just fetched (use local mdata to avoid stale state)
+          const matchLookup = new Map<string,string>();
+          (mdata || []).forEach((m:any) => {
+            const id = m.clerkId ?? m.userId ?? m.id ?? null;
+            if (id) matchLookup.set(String(id), m.displayName || m.username || m.name || String(id));
+          });
+
+      const mapped = (data || []).map((it: any) => {
+        const scheduled = it.scheduledTime ? new Date(it.scheduledTime) : null;
+        const rawParticipantId = it.participantId ? String(it.participantId) : "";
+        const resolvedName = matchLookup.get(rawParticipantId) || rawParticipantId || "Match";
+        const initials = resolvedName.split(" ").map((s: string) => s[0]).slice(0,2).join("") || (resolvedName.substring(0,2) || "M");
+        return {
+          id: it.id || it._id || "",
+          matchName: resolvedName,
+          matchInitials: initials || "M",
+          spot: it.location?.placeName || "",
+          location: it.location?.address || "",
+          date: scheduled ? format(scheduled, "PPP") : "",
+          time: scheduled ? format(scheduled, "p") : "",
+          status: mapBackendToUI(it.status),
+          note: it.note || it.description || "",
+        } as Appointment;
+      });
+      setAppointments(mapped);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => { fetchAppointments(); }, [user]);
 
   const upcoming = appointments.filter(a => a.status === "confirmed" || a.status === "pending");
   const past = appointments.filter(a => a.status === "completed" || a.status === "cancelled");
 
   const handleCancel = () => {
-    toast({ title: "Appointment cancelled", description: "Your date has been cancelled." });
-    setCancelId(null);
+    if (!cancelId) return;
+    fetch(`/api/appointments/${cancelId}`, { method: 'DELETE' }).then(res => {
+      if (!res.ok) throw new Error('Delete failed');
+      toast({ title: "Appointment cancelled", description: "Your date has been cancelled." });
+      setCancelId(null);
+      fetchAppointments();
+    }).catch(err => {
+      console.error(err);
+      toast({ title: "Error", description: "Could not cancel appointment.", variant: 'destructive' });
+    });
   };
 
   const AppointmentCard = ({ apt, showActions }: { apt: Appointment; showActions: boolean }) => (
@@ -79,8 +165,41 @@ const Appointments = () => {
               )}
               {showActions && (
                 <div className="flex gap-2 mt-3">
-                  <Button size="sm" variant="outline" className="gap-1"><Edit className="w-3.5 h-3.5" />Edit</Button>
-                  <Button size="sm" variant="outline" className="gap-1"><MessageCircle className="w-3.5 h-3.5" />Chat</Button>
+                  <Button size="sm" variant="outline" className="gap-1" onClick={async () => {
+                    try {
+                      const res = await fetch(`/api/appointments/${encodeURIComponent(apt.id)}`);
+                      if (!res.ok) throw new Error('Failed to load appointment');
+                      const data = await res.json();
+                          setEditAptRaw(data);
+                          // resolve participant name from matchedUsers (if available)
+                          const pid = data?.participantId ? String(data.participantId) : null;
+                          if (pid) {
+                            const found = (matchedUsers || []).find((m:any) => String(m.clerkId ?? m.userId ?? m.id) === pid);
+                            setEditParticipantName(found ? (found.displayName || found.username || found.name) : pid);
+                          } else {
+                            setEditParticipantName(null);
+                          }
+                      // map backend status to UI status for selection
+                      const ui = (s: any) => {
+                        if (!s) return 'pending';
+                        const st = String(s).toLowerCase();
+                        if (st === 'scheduled') return 'confirmed';
+                        if (st === 'proposed') return 'pending';
+                        if (st === 'canceled' || st === 'cancelled') return 'cancelled';
+                        return st;
+                      };
+                      setEditUiStatus(ui(data.status));
+                    } catch (e) {
+                      console.error(e);
+                      toast({ title: 'Error', description: 'Could not load appointment for editing.', variant: 'destructive' });
+                    }
+                  }}><Edit className="w-3.5 h-3.5" />Edit</Button>
+
+                  <Button size="sm" variant="outline" className="gap-1" onClick={() => {
+                    // navigate to messages, preselect conversation by id
+                    navigate('/messages', { state: { selectedConversationId: apt.matchName } });
+                  }}><MessageCircle className="w-3.5 h-3.5" />Chat</Button>
+
                   <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
                     <Trash2 className="w-3.5 h-3.5" />Cancel
                   </Button>
@@ -152,6 +271,71 @@ const Appointments = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setCancelId(null)}>Keep Date</Button>
             <Button variant="destructive" onClick={handleCancel}>Cancel Date</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Dialog */}
+      <Dialog open={editAptRaw !== null} onOpenChange={() => setEditAptRaw(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-serif">Edit Appointment</DialogTitle>
+            <DialogDescription>Update appointment status. You can also modify details in this dialog.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div>
+              <label className="block text-sm text-muted-foreground mb-1">Match</label>
+              <div className="text-foreground">{editParticipantName || editAptRaw?.participant || editAptRaw?.participantId || '—'}</div>
+            </div>
+            <div>
+              <label className="block text-sm text-muted-foreground mb-1">Place</label>
+              <div className="text-foreground">{editAptRaw?.location?.placeName || '—'}</div>
+            </div>
+            <div>
+              <label className="block text-sm text-muted-foreground mb-1">Scheduled</label>
+              <div className="text-foreground">{editAptRaw?.scheduledTime ? new Date(editAptRaw.scheduledTime).toLocaleString() : '—'}</div>
+            </div>
+
+            <div>
+              <label className="block text-sm text-muted-foreground mb-1">Status</label>
+              <select className="w-full p-2 border rounded" value={editUiStatus} onChange={(e) => setEditUiStatus(e.target.value)}>
+                <option value="pending">Pending</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditAptRaw(null)}>Close</Button>
+            <Button variant="gradient" onClick={async () => {
+              if (!editAptRaw) return;
+              const mapUIToBackend = (ui: string) => {
+                const s = String(ui).toLowerCase();
+                switch (s) {
+                  case 'confirmed': return 'scheduled';
+                  case 'pending': return 'proposed';
+                  case 'cancelled': return 'canceled';
+                  case 'completed': return 'completed';
+                  default: return s;
+                }
+              };
+              const updated = { ...editAptRaw, status: mapUIToBackend(editUiStatus) };
+              try {
+                const res = await fetch(`/api/appointments/${encodeURIComponent(editAptRaw.id)}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(updated),
+                });
+                if (!res.ok) throw new Error('Update failed');
+                toast({ title: 'Saved', description: 'Appointment updated.' });
+                setEditAptRaw(null);
+                fetchAppointments();
+              } catch (e) {
+                console.error(e);
+                toast({ title: 'Error', description: 'Could not update appointment.', variant: 'destructive' });
+              }
+            }}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

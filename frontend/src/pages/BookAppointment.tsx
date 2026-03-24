@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,28 +7,21 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
+import { useUser } from "@clerk/clerk-react";
+import { spots, costToEstimate } from "@/lib/dateSpots";
+import { useLocation } from "react-router-dom";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { CalendarIcon, Clock, MapPin, Heart, ArrowLeft, Check } from "lucide-react";
-import { format } from "date-fns";
+import { format, startOfDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 
-const matchedUsers = [
-  { id: 1, name: "Emma W.", initials: "EW", age: 26 },
-  { id: 2, name: "Sophie L.", initials: "SL", age: 24 },
-  { id: 3, name: "Olivia M.", initials: "OM", age: 28 },
-];
 
-const spots = [
-  { id: 1, name: "Sunset Rooftop Lounge", location: "Downtown" },
-  { id: 2, name: "The Cozy Bean Café", location: "Midtown" },
-  { id: 3, name: "Bella Italia Trattoria", location: "Little Italy" },
-  { id: 4, name: "Botanical Gardens Walk", location: "Westside Park" },
-  { id: 5, name: "Jazz & Blues Corner", location: "Arts District" },
-];
+
+// use `spots` imported from lib/dateSpots (includes cost metadata)
 
 const timeSlots = [
   "10:00 AM", "11:00 AM", "12:00 PM", "1:00 PM", "2:00 PM",
@@ -43,16 +36,129 @@ const BookAppointment = () => {
   const [note, setNote] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const { toast } = useToast();
+  const { user } = useUser();
+  const [matchedUsers, setMatchedUsers] = useState<Array<any>>([]);
+  const [userAppointments, setUserAppointments] = useState<Array<any>>([]);
+
+  useEffect(() => {
+    const clerkId = user?.id;
+    if (!clerkId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/discovery/matches?clerkId=${encodeURIComponent(clerkId)}&limit=50`);
+        if (!res.ok) throw new Error('Failed to fetch matches');
+        const data = await res.json();
+        if (!cancelled) setMatchedUsers(data);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+
+    // fetch user's existing appointments to detect conflicting times
+    (async () => {
+      try {
+        const res = await fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) setUserAppointments(data || []);
+        }
+      } catch (e) {
+        console.error('Could not load user appointments', e);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [user]);
+  const location = useLocation();
+
+  // preload spot from query param
+  useEffect(() => {
+    const qp = new URLSearchParams(location.search).get("spot");
+    if (qp) setSpot(qp);
+  }, [location.search]);
+
+  const selectedSpotObj = spot ? spots.find(s => String(s.id) === String(spot)) : undefined;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user?.id) {
+      toast({ title: "Not signed in", description: "Please sign in before booking.", variant: 'destructive' });
+      return;
+    }
     if (!date || !time || !spot || !matchUser) {
       toast({ title: "Missing fields", description: "Please fill in all required fields.", variant: "destructive" });
       return;
     }
-    setSubmitted(true);
-    toast({ title: "Date booked! 🎉", description: "Your appointment has been scheduled." });
+    // build payload
+    const scheduledIso = new Date(date);
+    // adjust scheduledIso with selected time (assumes local)
+    const [hourPart, meridiem] = time.split(" ");
+    const [hStr, mStr] = hourPart.split(":");
+    let h = parseInt(hStr, 10);
+    if (meridiem === "PM" && h !== 12) h += 12;
+    if (meridiem === "AM" && h === 12) h = 0;
+    scheduledIso.setHours(h, parseInt(mStr || "0", 10), 0, 0);
+
+    const estimate = selectedSpotObj ? costToEstimate(selectedSpotObj.cost) : { min: 0, max: 0 };
+
+    const payload = {
+      creatorId: user.id,
+      participantId: matchUser,
+      title: "Date Appointment",
+      location: { placeName: selectedSpotObj?.name || "", address: selectedSpotObj?.location || "" },
+      scheduledTime: scheduledIso.toISOString(),
+      estimatedCost: { min: estimate.min, max: estimate.max, currency: "VND" }
+    };
+
+    fetch('/api/appointments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(async res => {
+      if (!res.ok) throw new Error('Failed to create appointment');
+      setSubmitted(true);
+      toast({ title: "Date booked! 🎉", description: "Your appointment has been scheduled." });
+    }).catch(err => {
+      console.error(err);
+      toast({ title: "Error", description: "Could not schedule appointment.", variant: 'destructive' });
+    });
   };
+
+  // derive available time slots based on selected date and existing appointments
+  const availableTimeSlots = useMemo(() => {
+    if (!date) return timeSlots.map((t) => ({ slot: t, allowed: true }));
+    const now = new Date();
+    return timeSlots.map((t) => {
+      const slotDate = new Date(date);
+      const [hourPart, meridiem] = t.split(" ");
+      const [hStr, mStr] = hourPart.split(":");
+      let h = parseInt(hStr, 10);
+      if (meridiem === "PM" && h !== 12) h += 12;
+      if (meridiem === "AM" && h === 12) h = 0;
+      slotDate.setHours(h, parseInt(mStr || "0", 10), 0, 0);
+
+      // slot is in the past relative to now
+      const inPast = slotDate <= now;
+
+      // conflict if any existing appointment has the same date/time
+      const conflict = (userAppointments || []).some((a) => {
+        if (!a.scheduledTime) return false;
+        const s = new Date(a.scheduledTime);
+        return s.getFullYear() === slotDate.getFullYear() && s.getMonth() === slotDate.getMonth() && s.getDate() === slotDate.getDate() && s.getHours() === slotDate.getHours() && s.getMinutes() === slotDate.getMinutes();
+      });
+
+      const allowed = !inPast && !conflict;
+      return { slot: t, allowed };
+    });
+  }, [date, userAppointments]);
+
+  // if currently selected time becomes unavailable when date changes, clear it
+  useEffect(() => {
+    if (!time || !date) return;
+    const found = availableTimeSlots.find(s => s.slot === time);
+    if (found && !found.allowed) setTime("");
+  }, [availableTimeSlots, time, date]);
 
   if (submitted) {
     return (
@@ -102,24 +208,24 @@ const BookAppointment = () => {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {matchedUsers.map(user => (
+                  {matchedUsers.map((m) => (
                     <button
                       type="button"
-                      key={user.id}
-                      onClick={() => setMatchUser(String(user.id))}
+                      key={m.userId || m.id}
+                      onClick={() => setMatchUser(String(m.clerkId ?? m.userId ?? m.id))}
                       className={cn(
                         "flex items-center gap-3 p-3 rounded-xl border-2 transition-all",
-                        matchUser === String(user.id)
+                        matchUser === String(m.clerkId ?? m.userId ?? m.id)
                           ? "border-primary bg-coral-light/30"
                           : "border-border hover:border-primary/50"
                       )}
                     >
                       <Avatar className="h-10 w-10">
-                        <AvatarFallback className="gradient-primary text-primary-foreground text-sm">{user.initials}</AvatarFallback>
+                        <AvatarFallback className="gradient-primary text-primary-foreground text-sm">{((m.displayName||m.username||'U').split(' ').map((s:any)=>s[0]).slice(0,2).join(''))}</AvatarFallback>
                       </Avatar>
                       <div className="text-left">
-                        <p className="font-medium text-foreground text-sm">{user.name}</p>
-                        <p className="text-xs text-muted-foreground">Age {user.age}</p>
+                        <p className="font-medium text-foreground text-sm">{m.displayName || m.username || 'User'}</p>
+                        <p className="text-xs text-muted-foreground">Age {m.age ?? '—'}</p>
                       </div>
                     </button>
                   ))}
@@ -139,10 +245,13 @@ const BookAppointment = () => {
                   <SelectTrigger><SelectValue placeholder="Select a date spot" /></SelectTrigger>
                   <SelectContent>
                     {spots.map(s => (
-                      <SelectItem key={s.id} value={String(s.id)}>{s.name} — {s.location}</SelectItem>
+                      <SelectItem key={s.id} value={String(s.id)}>{s.name} — {s.location} ({s.cost})</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {selectedSpotObj && (
+                  <p className="text-sm text-muted-foreground mt-2">Estimated cost: {selectedSpotObj.cost} (~{costToEstimate(selectedSpotObj.cost).min}-{costToEstimate(selectedSpotObj.cost).max} VND)</p>
+                )}
               </CardContent>
             </Card>
 
@@ -168,7 +277,7 @@ const BookAppointment = () => {
                         mode="single"
                         selected={date}
                         onSelect={setDate}
-                        disabled={(d) => d < new Date()}
+                        disabled={(d) => d < startOfDay(new Date())}
                         initialFocus
                         className={cn("p-3 pointer-events-auto")}
                       />
@@ -183,8 +292,10 @@ const BookAppointment = () => {
                       <SelectValue placeholder="Select time" />
                     </SelectTrigger>
                     <SelectContent>
-                      {timeSlots.map(t => (
-                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      {availableTimeSlots.map(({ slot, allowed }) => (
+                        <SelectItem key={slot} value={slot} disabled={!allowed}>
+                          {slot}{!allowed && " — Unavailable"}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
