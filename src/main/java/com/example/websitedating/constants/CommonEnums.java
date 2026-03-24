@@ -25,5 +25,8 @@ public class CommonEnums {
     public enum ReportCategory { spam, harassment, fake_profile, scam, inappropriate_content, other }
     public enum ReportStatus { pending, reviewed, resolved }
 
+    public enum AccountStatus { ACTIVE, TEMPORARY_BANNED, PERMANENTLY_BANNED }
+    public enum AdminAction { CONFIRM_BAN, RESTORE_ACCOUNT }
+
     public enum ReasonTag { same_interest, nearby, similar_behavior, mutual_connection, profile_similarity }
 }

@@ -170,14 +170,21 @@ const AdminUsers = () => {
                 {users.length} registered users
               </p>
             </div>
-            <div className="relative max-w-sm w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Search by username or email..."
-                className="pl-10 rounded-full border-gray-200 bg-white/50"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+            <div className="flex items-center gap-3">
+              <Button variant="outline" size="sm" onClick={() => navigate("/admin/violations")}
+                className="gap-2 text-destructive border-destructive/30 hover:bg-destructive/5">
+                <ShieldAlert className="w-4 h-4" />
+                Violation Queue
+              </Button>
+              <div className="relative max-w-sm w-full">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by username or email..."
+                  className="pl-10 rounded-full border-gray-200 bg-white/50"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
             </div>
           </div>
 

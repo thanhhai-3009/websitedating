@@ -1,7 +1,9 @@
 package com.example.websitedating.repository;
 
+import java.util.List;
 import java.util.Optional;
 
+import com.example.websitedating.constants.CommonEnums.AccountStatus;
 import com.example.websitedating.models.User;
 import org.springframework.data.mongodb.repository.MongoRepository;
 
@@ -22,6 +24,8 @@ public interface UserRepository extends MongoRepository<User, String> {
 	Optional<User> findByClerkId(String clerkId);
 
 	Optional<User> findByPhone(String phone);
+
+	List<User> findByAccountStatus(AccountStatus accountStatus);
 }
 
 

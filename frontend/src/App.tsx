@@ -20,6 +20,7 @@ import BookAppointment from "./pages/BookAppointment";
 import Appointments from "./pages/Appointments";
 import DateReview from "./pages/DateReview";
 import AdminUsers from "./pages/AdminUsers";
+import AdminViolations from "./pages/AdminViolations";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -60,6 +61,7 @@ const App = () => (
           <Route path="/appointments" element={<ProtectedRoute><Appointments /></ProtectedRoute>} />
           <Route path="/review/:id" element={<ProtectedRoute><DateReview /></ProtectedRoute>} />
           <Route path="/admin" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
+          <Route path="/admin/violations" element={<ProtectedRoute><AdminViolations /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

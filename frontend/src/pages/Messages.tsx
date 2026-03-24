@@ -8,6 +8,8 @@ import {
   MoreVertical,
   Verified,
   PhoneOff,
+  AlertTriangle,
+  ShieldOff,
 } from "lucide-react";
 import axios from "axios";
 import { useAuth } from "@clerk/clerk-react";
@@ -18,6 +20,12 @@ import { ChatInput } from "@/components/chat/ChatInput";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -27,6 +35,8 @@ import {
 import { cn } from "@/lib/utils";
 import { useChat } from "@/hooks/useChat";
 import { useWebRTC } from "@/hooks/useWebRTC";
+import { BlockUserDialog } from "@/components/BlockUserDialog";
+import { ReportUserDialog } from "@/components/ReportUserDialog";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 
@@ -110,6 +120,8 @@ export default function Messages() {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [isLoadingConversations, setIsLoadingConversations] = useState(false);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
+  const [isBlockDialogOpen, setIsBlockDialogOpen] = useState(false);
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -300,6 +312,13 @@ export default function Messages() {
     return conversations.filter((conversation) => conversation.user.name.toLowerCase().includes(query));
   }, [conversations, searchQuery]);
 
+  const handleUserBlocked = () => {
+    if (!selectedChat) return;
+    setConversations(prev => prev.filter(c => c.id !== selectedChat.id));
+    setSelectedConversation(null);
+    setIsBlockDialogOpen(false);
+  };
+
   return (
     <Layout isAuthenticated>
       <div className="h-[calc(100vh-4rem)] flex">
@@ -416,9 +435,23 @@ export default function Messages() {
                   <Button variant="ghost" size="icon" onClick={() => startVideoCall(selectedChat.userId)}>
                     <Video className="w-5 h-5" />
                   </Button>
-                  <Button variant="ghost" size="icon">
-                    <MoreVertical className="w-5 h-5" />
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon">
+                        <MoreVertical className="w-5 h-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onSelect={() => setIsReportDialogOpen(true)}>
+                        <AlertTriangle className="mr-2 h-4 w-4 text-destructive" />
+                        <span>Report User</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setIsBlockDialogOpen(true)}>
+                        <ShieldOff className="mr-2 h-4 w-4 text-destructive" />
+                        <span>Block User</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
 
@@ -538,6 +571,25 @@ export default function Messages() {
           )}
         </div>
       </div>
+      {selectedChat && clerkId && (
+        <>
+          <BlockUserDialog
+            open={isBlockDialogOpen}
+            onOpenChange={setIsBlockDialogOpen}
+            userName={selectedChat.user.name}
+            blockedUserId={selectedChat.userId}
+            blockerClerkId={clerkId}
+            onBlocked={handleUserBlocked}
+          />
+          <ReportUserDialog
+            open={isReportDialogOpen}
+            onOpenChange={setIsReportDialogOpen}
+            userName={selectedChat.user.name}
+            reportedUserId={selectedChat.userId}
+            reporterClerkId={clerkId}
+          />
+        </>
+      )}
     </Layout>
   );
 }

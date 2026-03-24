@@ -1,5 +1,6 @@
 package com.example.websitedating.models;
 
+import com.example.websitedating.constants.CommonEnums.AccountStatus;
 import com.example.websitedating.constants.CommonEnums.RecentActionType;
 import lombok.*;
 import org.springframework.data.annotation.CreatedDate;
@@ -49,6 +50,16 @@ public class User {
     private String premiumPlan;
 
     private Instant premiumExpiresAt;
+
+    @Builder.Default
+    private AccountStatus accountStatus = AccountStatus.ACTIVE;
+
+    @Builder.Default
+    private Integer reportCount = 0;
+
+    private Instant bannedAt;
+
+    private Instant restoredAt;
 
     private Profile profile;
     private Preferences preferences;
