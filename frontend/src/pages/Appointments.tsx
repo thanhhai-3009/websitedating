@@ -38,36 +38,13 @@ const Appointments = () => {
   const navigate = useNavigate();
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [matchedUsers, setMatchedUsers] = useState<Array<any>>([]);
   const [editAptRaw, setEditAptRaw] = useState<any | null>(null);
+  const [editParticipantName, setEditParticipantName] = useState<string | null>(null);
   const [editUiStatus, setEditUiStatus] = useState<string>("pending");
   const { toast } = useToast();
   const { user } = useUser();
 
-      // collect participantIds that are missing from matchLookup
-      const participantIds = Array.from(new Set((data || []).map((it:any) => it.participantId ? String(it.participantId) : null).filter(Boolean)));
-      const missing = participantIds.filter(pid => !matchLookup.has(pid));
-      if (missing.length > 0) {
-        try {
-          // fetch profiles for missing ids in parallel
-          const profiles = await Promise.all(missing.map(async (pid) => {
-            try {
-              const r = await fetch(`/api/users/profile/${encodeURIComponent(pid)}`);
-              if (!r.ok) return null;
-              return await r.json();
-            } catch (e) {
-              return null;
-            }
-          }));
-          profiles.forEach((p:any, idx:number) => {
-            const pid = missing[idx];
-            if (p && pid) {
-              matchLookup.set(pid, p.displayName || p.name || pid);
-            }
-          });
-        } catch (e) {
-          console.error('Could not resolve participant profiles', e);
-        }
-      }
   const fetchAppointments = async () => {
     const clerkId = user?.id;
     if (!clerkId) return;
@@ -75,6 +52,18 @@ const Appointments = () => {
       const res = await fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`);
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
+      // also fetch matched users so we can resolve participantId -> display name
+          let mdata: any[] = [];
+          try {
+            const mres = await fetch(`/api/discovery/matches?clerkId=${encodeURIComponent(clerkId)}&limit=200`);
+            if (mres.ok) {
+              mdata = await mres.json();
+              setMatchedUsers(mdata || []);
+            }
+          } catch (e) {
+            console.error('Could not load matches', e);
+          }
+
       // normalize server shape to UI shape
       const mapBackendToUI = (s: any) => {
         if (!s) return 'pending';
@@ -97,13 +86,22 @@ const Appointments = () => {
         }
       };
 
+      // build a quick lookup from matchedUsers returned above
+          // build a quick lookup from matches we just fetched (use local mdata to avoid stale state)
+          const matchLookup = new Map<string,string>();
+          (mdata || []).forEach((m:any) => {
+            const id = m.clerkId ?? m.userId ?? m.id ?? null;
+            if (id) matchLookup.set(String(id), m.displayName || m.username || m.name || String(id));
+          });
+
       const mapped = (data || []).map((it: any) => {
         const scheduled = it.scheduledTime ? new Date(it.scheduledTime) : null;
-        const matchName = it.participantId ? String(it.participantId) : "Match";
-        const initials = matchName.split(" ").map((s: string) => s[0]).slice(0,2).join("");
+        const rawParticipantId = it.participantId ? String(it.participantId) : "";
+        const resolvedName = matchLookup.get(rawParticipantId) || rawParticipantId || "Match";
+        const initials = resolvedName.split(" ").map((s: string) => s[0]).slice(0,2).join("") || (resolvedName.substring(0,2) || "M");
         return {
           id: it.id || it._id || "",
-          matchName,
+          matchName: resolvedName,
           matchInitials: initials || "M",
           spot: it.location?.placeName || "",
           location: it.location?.address || "",
@@ -172,7 +170,15 @@ const Appointments = () => {
                       const res = await fetch(`/api/appointments/${encodeURIComponent(apt.id)}`);
                       if (!res.ok) throw new Error('Failed to load appointment');
                       const data = await res.json();
-                      setEditAptRaw(data);
+                          setEditAptRaw(data);
+                          // resolve participant name from matchedUsers (if available)
+                          const pid = data?.participantId ? String(data.participantId) : null;
+                          if (pid) {
+                            const found = (matchedUsers || []).find((m:any) => String(m.clerkId ?? m.userId ?? m.id) === pid);
+                            setEditParticipantName(found ? (found.displayName || found.username || found.name) : pid);
+                          } else {
+                            setEditParticipantName(null);
+                          }
                       // map backend status to UI status for selection
                       const ui = (s: any) => {
                         if (!s) return 'pending';
@@ -279,7 +285,7 @@ const Appointments = () => {
           <div className="space-y-4 mt-2">
             <div>
               <label className="block text-sm text-muted-foreground mb-1">Match</label>
-              <div className="text-foreground">{editAptRaw?.participantId || editAptRaw?.participant || '—'}</div>
+              <div className="text-foreground">{editParticipantName || editAptRaw?.participant || editAptRaw?.participantId || '—'}</div>
             </div>
             <div>
               <label className="block text-sm text-muted-foreground mb-1">Place</label>
