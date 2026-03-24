@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
+import { getApiToken } from "@/lib/clerkToken";
 
 interface CurrentUser {
   id: string;
@@ -25,7 +26,11 @@ export function useCurrentUser() {
 
     const fetchMe = async () => {
       try {
-        const token = await getToken();
+        const token = await getApiToken(getToken);
+        if (!token) {
+          setUser(null);
+          return;
+        }
         const res = await fetch("http://localhost:8080/api/auth/me", {
           headers: { Authorization: `Bearer ${token}` }
         });

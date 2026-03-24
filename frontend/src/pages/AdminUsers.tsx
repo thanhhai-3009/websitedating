@@ -16,6 +16,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Navbar } from "@/components/layout/Navbar";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { getApiToken } from "@/lib/clerkToken";
 
 interface User {
   id: string;
@@ -49,7 +50,7 @@ const AdminUsers = () => {
 
   const fetchUsers = async () => {
     try {
-      const token = await getToken();
+      const token = await getApiToken(getToken);
       const response = await fetch("http://localhost:8080/api/admin/users", {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -75,7 +76,7 @@ const AdminUsers = () => {
   const handleDeleteUser = async (userId: string, username: string) => {
     if (!window.confirm(`Are you sure you want to permanently delete "${username}"? This will remove them from both the database and Clerk.`)) return;
     try {
-      const token = await getToken();
+      const token = await getApiToken(getToken);
       const response = await fetch(`http://localhost:8080/api/admin/users/${userId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` }
@@ -90,7 +91,7 @@ const AdminUsers = () => {
 
   const handleRoleChange = async (userId: string, username: string, newRole: string) => {
     try {
-      const token = await getToken();
+      const token = await getApiToken(getToken);
       const response = await fetch(`http://localhost:8080/api/admin/users/${userId}/role`, {
         method: "PATCH",
         headers: {
