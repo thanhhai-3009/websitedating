@@ -1,6 +1,7 @@
 package com.example.websitedating.dto;
 
 import com.example.websitedating.models.User;
+import java.time.Instant;
 
 public class UserResponse {
 
@@ -11,6 +12,9 @@ public class UserResponse {
     private String phone;
     private boolean isVerified;
     private String role;
+    private String premiumPlan;
+    private Instant premiumExpiresAt;
+    private boolean premiumActive;
 
     public static UserResponse from(User user) {
         UserResponse response = new UserResponse();
@@ -21,6 +25,9 @@ public class UserResponse {
         response.phone = user.getPhone();
         response.isVerified = Boolean.TRUE.equals(user.getIsVerified());
         response.role = user.getRole();
+        response.premiumPlan = user.getPremiumPlan();
+        response.premiumExpiresAt = user.getPremiumExpiresAt();
+        response.premiumActive = user.hasActivePremium();
         return response;
     }
 
@@ -50,5 +57,17 @@ public class UserResponse {
 
     public String getRole() {
         return role;
+    }
+
+    public String getPremiumPlan() {
+        return premiumPlan;
+    }
+
+    public Instant getPremiumExpiresAt() {
+        return premiumExpiresAt;
+    }
+
+    public boolean isPremiumActive() {
+        return premiumActive;
     }
 }

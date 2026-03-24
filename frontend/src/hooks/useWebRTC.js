@@ -1,3 +1,4 @@
+import { getApiToken } from "@/lib/clerkToken";
 import { useAuth } from "@clerk/clerk-react";
 import { Client } from "@stomp/stompjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -49,7 +50,7 @@ export function useWebRTC(roomId, senderId) {
     let isMounted = true;
     const loadIceServers = async () => {
       try {
-        const token = await getToken();
+        const token = await getApiToken(getToken);
         const response = await fetch(`${API_BASE_URL}/api/webrtc/ice-servers`, {
           headers: token
             ? {
@@ -290,7 +291,7 @@ export function useWebRTC(roomId, senderId) {
       reconnectDelay: 5000,
       debug: () => {},
       beforeConnect: async () => {
-        const token = await getToken();
+        const token = await getApiToken(getToken);
         if (!token) {
           throw new Error("Missing auth token");
         }

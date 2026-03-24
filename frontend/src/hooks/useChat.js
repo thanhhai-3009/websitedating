@@ -3,6 +3,7 @@ import { useAuth } from "@clerk/clerk-react";
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client/dist/sockjs";
 import axios from "axios";
+import { getApiToken } from "@/lib/clerkToken";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 const CHAT_TYPES = new Set(["CHAT", "IMAGE", "JOIN", "LEAVE"]);
@@ -47,7 +48,7 @@ export function useChat(roomId, senderId) {
 
     const loadHistory = async () => {
       try {
-        const token = await getToken();
+        const token = await getApiToken(getToken);
         const response = await axios.get(`${API_BASE_URL}/api/chats/rooms/${encodeURIComponent(roomId)}/messages`, {
           params: { limit: 120 },
           headers: token
@@ -72,7 +73,7 @@ export function useChat(roomId, senderId) {
       reconnectDelay: 5000,
       debug: () => {},
       beforeConnect: async () => {
-        const token = await getToken();
+        const token = await getApiToken(getToken);
         if (!token) {
           throw new Error("Missing auth token");
         }
@@ -163,7 +164,7 @@ export function useChat(roomId, senderId) {
         }
 
         try {
-          const token = await getToken();
+          const token = await getApiToken(getToken);
           if (!token) {
             throw new Error("Missing auth token");
           }

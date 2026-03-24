@@ -45,6 +45,9 @@ class DiscoveryServiceTest {
     @Mock
     private MongoTemplate mongoTemplate;
 
+    @Mock
+    private NotificationService notificationService;
+
     private DiscoveryService discoveryService;
 
     @BeforeEach
@@ -55,7 +58,8 @@ class DiscoveryServiceTest {
                 blockRepository,
                 reportRepository,
                 matchSuggestionRepository,
-                mongoTemplate);
+                mongoTemplate,
+                notificationService);
     }
 
     @Test

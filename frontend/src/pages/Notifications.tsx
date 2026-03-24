@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useNotifications, AppNotification } from "@/hooks/useNotifications";
 import { formatDistanceToNow } from "date-fns";
+import { useNavigate } from "react-router-dom";
 const getIconColor = (type: string) => {
   switch (type) {
     case "new_match":
@@ -37,12 +38,21 @@ const getNotificationIcon = (type: string) => {
 };
 
 export default function Notifications() {
+  const navigate = useNavigate();
   const { allNotifications, unreadNotifications, isLoadingAll, markAsRead } = useNotifications();
   const unreadCount = unreadNotifications.length;
 
   const handleNotificationClick = (n: AppNotification) => {
     if (!n.isRead) {
       markAsRead.mutate(n.id);
+    }
+
+    if (n.type === "new_message" && n.data?.senderUserId) {
+      navigate("/messages", {
+        state: {
+          selectedConversationId: n.data.senderUserId,
+        },
+      });
     }
   };
 
@@ -57,7 +67,7 @@ export default function Notifications() {
       message: n.content,
       time: formatDistanceToNow(new Date(n.createdAt), { addSuffix: true }),
       read: n.isRead,
-      image: n.data?.matchedUserAvatar || null,
+      image: n.data?.matchedUserAvatar || n.data?.senderAvatar || null,
     };
   });
 
