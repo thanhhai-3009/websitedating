@@ -8,10 +8,11 @@ import {
   MoreVertical,
   Verified,
   PhoneOff,
+  Crown,
 } from "lucide-react";
 import axios from "axios";
 import { useAuth } from "@clerk/clerk-react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Layout } from "@/components/layout/Layout";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { ChatInput } from "@/components/chat/ChatInput";
@@ -27,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useChat } from "@/hooks/useChat";
 import { useWebRTC } from "@/hooks/useWebRTC";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 
@@ -101,8 +103,12 @@ const toAbsoluteMediaUrl = (url?: string) => {
 
 export default function Messages() {
   const location = useLocation();
+  const navigate = useNavigate();
   const preselectedConversationId = (location.state as { selectedConversationId?: string } | null)?.selectedConversationId;
   const { userId: clerkId, userId } = useAuth();
+  const { user: currentUser, isLoading: isCurrentUserLoading } = useCurrentUser();
+  const isPremiumUser = Boolean(currentUser?.premiumActive);
+  const isMessagesLocked = Boolean(clerkId) && !isCurrentUserLoading && !isPremiumUser;
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [draftMessage, setDraftMessage] = useState("");
@@ -122,6 +128,14 @@ export default function Messages() {
 
     const loadConversations = async () => {
       if (!clerkId) {
+        return;
+      }
+
+      if (isMessagesLocked) {
+        setConversations([]);
+        setSelectedConversation(null);
+        setIsLoadingConversations(false);
+        setConversationsError(null);
         return;
       }
 
@@ -176,7 +190,7 @@ export default function Messages() {
     return () => {
       isMounted = false;
     };
-  }, [clerkId, preselectedConversationId, selectedConversation]);
+  }, [clerkId, isMessagesLocked, preselectedConversationId, selectedConversation]);
 
   useEffect(() => {
     let isMounted = true;
@@ -202,6 +216,7 @@ export default function Messages() {
 
   const selectedChat = conversations.find((c) => c.id === selectedConversation);
   const roomId = selectedChat?.roomId || null;
+  const effectiveRoomId = isMessagesLocked ? null : roomId;
   const roomDerivedDbUserId = useMemo(() => {
     if (!roomId || !selectedChat?.userId || !roomId.startsWith("dm-")) {
       return null;
@@ -212,7 +227,7 @@ export default function Messages() {
     }
     return ids[0] === selectedChat.userId ? ids[1] : ids[0];
   }, [roomId, selectedChat?.userId]);
-  const currentDbUserId = selfDbUserId || roomDerivedDbUserId;
+  const currentDbUserId = isMessagesLocked ? null : (selfDbUserId || roomDerivedDbUserId);
 
   const {
     messages: liveMessages,
@@ -220,7 +235,7 @@ export default function Messages() {
     error,
     sendTextMessage,
     sendImageMessage,
-  } = useChat(roomId, currentDbUserId);
+  } = useChat(effectiveRoomId, currentDbUserId);
 
   const {
     isInCall,
@@ -234,7 +249,7 @@ export default function Messages() {
     acceptIncomingCall,
     rejectIncomingCall,
     endCall,
-  } = useWebRTC(roomId, currentDbUserId);
+  } = useWebRTC(effectiveRoomId, currentDbUserId);
 
   useEffect(() => {
     if (localVideoRef.current) {
@@ -265,7 +280,7 @@ export default function Messages() {
         id: msg?.id || `${msg?.timestamp || "msg"}-${index}`,
         message: isImage ? "" : msg?.content || "",
         image: isImage ? msg?.content : undefined,
-        timestamp: toDisplayTime(msg?.timestamp),
+        timestamp: toDisplayTi(msg?.timestamp),
         isOwn: mine,
         status: mine ? ("sent" as const) : undefined,
       };
@@ -302,7 +317,8 @@ export default function Messages() {
 
   return (
     <Layout isAuthenticated>
-      <div className="h-[calc(100vh-4rem)] flex">
+      <div className="h-[calc(100vh-4rem)] relative">
+        <div className={cn("h-full flex", isMessagesLocked && "blur-sm pointer-events-none select-none") }>
         <div
           className={cn(
             "w-full md:w-80 lg:w-96 border-r border-border bg-card flex flex-col",
@@ -537,6 +553,30 @@ export default function Messages() {
             </div>
           )}
         </div>
+        </div>
+
+        {isMessagesLocked && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/50 backdrop-blur-[2px] px-4">
+            <div className="max-w-md w-full rounded-2xl border border-border bg-card/95 p-6 text-center shadow-xl">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gold text-white">
+                <Crown className="h-6 w-6" />
+              </div>
+              <h2 className="text-xl font-semibold text-foreground">Premium required for Messages</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Upgrade to Premium to unlock messaging with your matches.
+              </p>
+              <Button className="mt-5" variant="gradient" onClick={() => navigate("/premium")}>
+                Upgrade to Premium
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {Boolean(clerkId) && isCurrentUserLoading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
+            <p className="text-sm text-muted-foreground">Checking premium access...</p>
+          </div>
+        )}
       </div>
     </Layout>
   );
