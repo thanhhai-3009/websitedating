@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Bell, Heart, MessageCircle, Calendar, Star, UserCheck, Settings } from "lucide-react";
+import { Bell, Heart, MessageCircle, Calendar, Star, Settings } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -58,16 +58,22 @@ export default function Notifications() {
 
   const mappedNotifications = allNotifications.map((n) => {
     const Icon = getNotificationIcon(n.type);
+    const titleByType: Record<string, string> = {
+      new_match: "New Match",
+      connection_liked: "New Like",
+      new_message: "New Message",
+    };
+
     return {
       id: n.id,
       original: n,
       type: n.type,
       icon: Icon,
-      title: n.type === "new_match" ? "New Match!" : n.type.replace("_", " ").toUpperCase(),
+      title: titleByType[n.type] || n.type.replace("_", " ").toUpperCase(),
       message: n.content,
       time: formatDistanceToNow(new Date(n.createdAt), { addSuffix: true }),
       read: n.isRead,
-      image: n.data?.matchedUserAvatar || n.data?.senderAvatar || null,
+      image: n.data?.matchedUserAvatar || n.data?.likedByUserAvatar || n.data?.senderAvatar || null,
     };
   });
 
