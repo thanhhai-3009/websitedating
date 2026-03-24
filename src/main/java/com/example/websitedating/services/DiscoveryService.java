@@ -35,6 +35,10 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
+
 
 @Service
 public class DiscoveryService {
@@ -47,7 +51,27 @@ public class DiscoveryService {
     private final ReportRepository reportRepository;
     private final MatchSuggestionRepository matchSuggestionRepository;
     private final MongoTemplate mongoTemplate;
+    private final NotificationService notificationService;
 
+    @Autowired
+    public DiscoveryService(
+            UserRepository userRepository,
+            ConnectionRepository connectionRepository,
+            BlockRepository blockRepository,
+            ReportRepository reportRepository,
+            MatchSuggestionRepository matchSuggestionRepository,
+            MongoTemplate mongoTemplate,
+            NotificationService notificationService) {
+        this.userRepository = userRepository;
+        this.connectionRepository = connectionRepository;
+        this.blockRepository = blockRepository;
+        this.reportRepository = reportRepository;
+        this.matchSuggestionRepository = matchSuggestionRepository;
+        this.mongoTemplate = mongoTemplate;
+        this.notificationService = notificationService;
+    }
+
+    // Backwards-compatible constructor for tests or older callers that do not provide NotificationService
     public DiscoveryService(
             UserRepository userRepository,
             ConnectionRepository connectionRepository,
@@ -55,16 +79,14 @@ public class DiscoveryService {
             ReportRepository reportRepository,
             MatchSuggestionRepository matchSuggestionRepository,
             MongoTemplate mongoTemplate) {
-        this.userRepository = userRepository;
-        this.connectionRepository = connectionRepository;
-        this.blockRepository = blockRepository;
-        this.reportRepository = reportRepository;
-        this.matchSuggestionRepository = matchSuggestionRepository;
-        this.mongoTemplate = mongoTemplate;
+        this(userRepository, connectionRepository, blockRepository, reportRepository, matchSuggestionRepository, mongoTemplate, null);
     }
 
     public List<DiscoverUserResponse> nearby(String clerkId, Double longitude, Double latitude, Integer radiusKm, Integer limit) {
         User me = findByClerkId(clerkId);
+        if (!me.hasActivePremium()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "GPS nearby discovery requires an active premium subscription.");
+        }
         GeoJsonPoint center = resolveCenter(me, longitude, latitude);
         int effectiveRadiusKm = radiusKm == null || radiusKm <= 0 ? defaultRadius(me) : Math.min(radiusKm, 500);
         int effectiveLimit = limit == null || limit <= 0 ? 20 : Math.min(limit, 100);
@@ -111,23 +133,28 @@ public class DiscoveryService {
                 .toList();
     }
 
-    public List<MatchResponse> matches(String clerkId, Integer limit) {
+    public List<MatchResponse> matches(String clerkId, Integer limit, Boolean includeLiked, Boolean includeSentLiked) {
         User me = findByClerkId(clerkId);
         int effectiveLimit = limit == null || limit <= 0 ? 50 : Math.min(limit, 100);
+        boolean shouldIncludeLiked = Boolean.TRUE.equals(includeLiked);
+        boolean shouldIncludeSentLiked = Boolean.TRUE.equals(includeSentLiked);
 
         List<Connection> orderedConnections = connectionRepository.findBySenderIdOrReceiverId(me.getId(), me.getId()).stream()
-                .filter(connection -> connection.getStatus() == ConnectionStatus.matched
-                        || connection.getStatus() == ConnectionStatus.accepted)
+                .filter(connection -> isVisibleInMatches(connection, me.getId(), shouldIncludeLiked, shouldIncludeSentLiked))
                 .sorted(Comparator.comparing(this::connectionTimestamp, Comparator.nullsLast(Comparator.naturalOrder())).reversed())
                 .toList();
 
         LinkedHashMap<String, Instant> counterpartMatchedAt = new LinkedHashMap<>();
+        LinkedHashMap<String, ConnectionStatus> counterpartStatus = new LinkedHashMap<>();
+        LinkedHashMap<String, Boolean> counterpartLikedByMe = new LinkedHashMap<>();
         for (Connection connection : orderedConnections) {
             String counterpartId = me.getId().equals(connection.getSenderId())
                     ? connection.getReceiverId()
                     : connection.getSenderId();
             if (counterpartId != null && !counterpartId.isBlank()) {
                 counterpartMatchedAt.putIfAbsent(counterpartId, connectionTimestamp(connection));
+                counterpartStatus.putIfAbsent(counterpartId, connection.getStatus());
+                counterpartLikedByMe.putIfAbsent(counterpartId, me.getId().equals(connection.getSenderId()));
             }
         }
 
@@ -146,7 +173,12 @@ public class DiscoveryService {
                     if (candidate == null) {
                         return null;
                     }
-                    return MatchResponse.from(candidate, entry.getValue(), buildDirectRoomId(me.getId(), candidate.getId()));
+                    return MatchResponse.from(
+                            candidate,
+                            entry.getValue(),
+                            buildDirectRoomId(me.getId(), candidate.getId()),
+                            counterpartStatus.get(entry.getKey()),
+                            Boolean.TRUE.equals(counterpartLikedByMe.get(entry.getKey())));
                 })
                 .filter(value -> value != null)
                 .limit(effectiveLimit)
@@ -217,15 +249,19 @@ public class DiscoveryService {
                 .filter(value -> value.getSenderId() != null && value.getReceiverId() != null)
                 .filter(value -> !value.getSenderId().equals(value.getReceiverId()))
                 .findFirst()
-                .orElseGet(() -> Connection.builder()
-                        .senderId(target.getId())
-                        .receiverId(me.getId())
-                        .interactionType(InteractionType.match_invite)
-                        .matchedBy(MatchedBy.manual)
-                        .build());
+                .orElseThrow(() -> new IllegalArgumentException("No like request from this user"));
 
-        if (connection.getStatus() != ConnectionStatus.matched) {
-            connection.setStatus(ConnectionStatus.accepted);
+        if (connection.getStatus() == ConnectionStatus.liked && !me.getId().equals(connection.getReceiverId())) {
+            throw new IllegalArgumentException("Only the recipient can accept this like");
+        }
+
+        if (connection.getStatus() == ConnectionStatus.liked && !target.getId().equals(connection.getSenderId())) {
+            throw new IllegalArgumentException("Invalid like request owner");
+        }
+
+        boolean becameMatched = connection.getStatus() != ConnectionStatus.matched;
+        if (becameMatched) {
+            connection.setStatus(ConnectionStatus.matched);
         }
         if (connection.getInteractionType() == null) {
             connection.setInteractionType(InteractionType.match_invite);
@@ -234,12 +270,17 @@ public class DiscoveryService {
             connection.setMatchedBy(MatchedBy.manual);
         }
 
-        connectionRepository.save(connection);
+        if (becameMatched) {
+            connectionRepository.save(connection);
+        }
+        if (becameMatched) {
+            emitMatchNotifications(me.getId(), target.getId());
+        }
     }
 
     private void saveConnection(String senderId, String receiverId, InteractionType interactionType) {
         InteractionType effectiveInteraction = interactionType == null ? InteractionType.like : interactionType;
-        ConnectionStatus desiredStatus = ConnectionStatus.matched;
+        ConnectionStatus desiredStatus = ConnectionStatus.liked;
 
         List<Connection> existing = connectionRepository.findBySenderIdInAndReceiverIdIn(
                 Arrays.asList(senderId, receiverId),
@@ -249,9 +290,12 @@ public class DiscoveryService {
             Connection first = existing.get(0);
             boolean changed = false;
 
-            if (first.getStatus() != ConnectionStatus.matched && first.getStatus() != ConnectionStatus.accepted) {
+            if (first.getStatus() != ConnectionStatus.liked
+                    && first.getStatus() != ConnectionStatus.matched
+                    && first.getStatus() != ConnectionStatus.accepted) {
                 first.setStatus(desiredStatus);
                 changed = true;
+                emitLikeNotification(senderId, receiverId);
             }
             if (effectiveInteraction == InteractionType.match_invite
                     && first.getInteractionType() != InteractionType.match_invite) {
@@ -273,6 +317,35 @@ public class DiscoveryService {
                 .matchedBy(effectiveInteraction == InteractionType.match_invite ? MatchedBy.manual : MatchedBy.behavior)
                 .build();
         connectionRepository.save(connection);
+        emitLikeNotification(senderId, receiverId);
+    }
+
+    private boolean isVisibleInMatches(Connection connection, String meId, boolean includeLiked, boolean includeSentLiked) {
+        ConnectionStatus status = connection.getStatus();
+        if (status == ConnectionStatus.matched || status == ConnectionStatus.accepted) {
+            return true;
+        }
+        if (status != ConnectionStatus.liked || meId == null) {
+            return false;
+        }
+        if (includeLiked && meId.equals(connection.getReceiverId())) {
+            return true;
+        }
+        return includeSentLiked && meId.equals(connection.getSenderId());
+    }
+
+    private void emitLikeNotification(String senderId, String receiverId) {
+        if (notificationService != null) {
+            notificationService.createConnectionLikedNotification(receiverId, senderId);
+        }
+    }
+
+    private void emitMatchNotifications(String firstUserId, String secondUserId) {
+        if (notificationService == null) {
+            return;
+        }
+        notificationService.createMatchNotification(firstUserId, secondUserId);
+        notificationService.createMatchNotification(secondUserId, firstUserId);
     }
 
     private List<User> baseCandidates(User me, int maxCandidates) {
@@ -386,6 +459,9 @@ public class DiscoveryService {
                 : candidate.getProfile().getInterests());
         response.setVerified(Boolean.TRUE.equals(candidate.getIsVerified()));
         response.setDistanceKm(round(distanceKm(me, candidate)));
+
+        // expose clerkId so frontend can reference Clerk user id (for API calls)
+        response.setClerkId(candidate.getClerkId());
 
         if (scoredCandidate != null) {
             response.setScore(scoredCandidate.score());

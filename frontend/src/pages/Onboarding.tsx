@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useUser } from "@clerk/clerk-react";
@@ -159,7 +159,7 @@ export default function Onboarding() {
 
   const requestCurrentLocation = () => {
     if (!navigator.geolocation) {
-      setLocationPermissionError("Trinh duyet khong ho tro dinh vi.");
+      setLocationPermissionError("");
       return;
     }
 
@@ -188,25 +188,15 @@ export default function Onboarding() {
         setIsLocating(false);
       },
       () => {
-        setLocationPermissionError(
-          "Vui long bat quyen dinh vi tren thiet bi va trinh duyet de tiep tuc."
-        );
+        // Allow manual address input without showing geolocation error banners.
+        setLocationPermissionError("");
         setIsLocating(false);
       },
       { enableHighAccuracy: true, maximumAge: 60000, timeout: 12000 }
     );
   };
 
-  useEffect(() => {
-    requestCurrentLocation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const saveOnboarding = async () => {
-    if (formData.longitude === undefined || formData.latitude === undefined) {
-      throw new Error("Can bat dinh vi de luu ho so onboarding.");
-    }
-
     setIsSaving(true);
     setSaveError("");
     try {
@@ -249,12 +239,6 @@ export default function Onboarding() {
   };
 
   const handleNext = async () => {
-    if (formData.longitude === undefined || formData.latitude === undefined) {
-      setSaveError("Can bat dinh vi de tiep tuc onboarding.");
-      requestCurrentLocation();
-      return;
-    }
-
     if (currentStep === 2 && formData.photos.length < 2) {
       setPhotoError("Please upload at least 2 photos before continuing.");
       return;
@@ -396,9 +380,10 @@ export default function Onboarding() {
                     <Input
                       placeholder="Enter your city"
                       value={formData.location}
-                      onChange={(e) =>
-                        setFormData({ ...formData, location: e.target.value })
-                      }
+                      onChange={(e) => {
+                        setLocationPermissionError("");
+                        setFormData({ ...formData, location: e.target.value });
+                      }}
                       className="pl-10 h-12"
                     />
                   </div>

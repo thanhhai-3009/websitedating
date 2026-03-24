@@ -12,6 +12,7 @@ import {
   HelpCircle,
   ChevronRight,
   Plus,
+  Crown,
 } from "lucide-react";
 import { useClerk, useUser } from "@clerk/clerk-react";
 import { useNavigate } from "react-router-dom";
@@ -42,10 +43,14 @@ type ProfileState = {
     phone: boolean;
     profile: boolean;
   };
+  premiumPlan: string;
+  premiumActive: boolean;
+  premiumExpiresAt: string;
 };
 
 const menuItems = [
   { icon: Edit3, label: "Edit Profile", href: "#edit" },
+  { icon: Crown, label: "Premium", href: "/premium" },
   { icon: Settings, label: "Account Settings", href: "#" },
   { icon: Bell, label: "Notifications", href: "/notifications" },
   { icon: Shield, label: "Privacy & Safety", href: "#" },
@@ -77,6 +82,9 @@ const EMPTY_PROFILE: ProfileState = {
     phone: false,
     profile: false,
   },
+  premiumPlan: "",
+  premiumActive: false,
+  premiumExpiresAt: "",
 };
 
 type ProfileApiResponse = {
@@ -96,6 +104,35 @@ type ProfileApiResponse = {
   emailVerified?: boolean;
   phoneVerified?: boolean;
   profileVerified?: boolean;
+  premiumPlan?: string;
+  premiumActive?: boolean;
+  premiumExpiresAt?: string;
+};
+
+const formatPremiumPlanLabel = (planId: string) => {
+  const normalized = (planId || "").trim().toLowerCase();
+  if (normalized === "platinum") {
+    return "Platinum";
+  }
+  if (normalized === "gold") {
+    return "Gold";
+  }
+  return "Premium";
+};
+
+const formatPremiumExpiry = (value: string) => {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  }).format(date);
 };
 
 const getAgeFromBirthday = (birthday: string) => {
@@ -204,6 +241,9 @@ export default function Profile() {
         phone: isPhoneVerified,
         profile: Boolean(data.profileVerified),
       },
+      premiumPlan: (data.premiumPlan || "").trim().toLowerCase(),
+      premiumActive: Boolean(data.premiumActive),
+      premiumExpiresAt: data.premiumExpiresAt || "",
     });
   };
 
@@ -219,6 +259,9 @@ export default function Profile() {
         phone: fallbackPhone.length > 0,
         profile: false,
       },
+      premiumPlan: "",
+      premiumActive: false,
+      premiumExpiresAt: "",
     }));
   };
 
@@ -257,7 +300,9 @@ export default function Profile() {
 
   const requestCurrentLocation = () => {
     if (!navigator.geolocation) {
-      setLocationPermissionError("Trinh duyet khong ho tro dinh vi.");
+      setLocationPermissionError(
+        "Geolocation is not supported by this browser. Please enter your location manually."
+      );
       return;
     }
 
@@ -285,10 +330,20 @@ export default function Profile() {
 
         setIsLocating(false);
       },
-      () => {
-        setLocationPermissionError(
-          "Vui long bat quyen dinh vi tren thiet bi va trinh duyet de tiep tuc."
-        );
+      (geoError) => {
+        if (geoError.code === geoError.PERMISSION_DENIED) {
+          setLocationPermissionError(
+            "Location access is turned off. Please enable location permission in your browser/device settings and try again."
+          );
+        } else if (geoError.code === geoError.TIMEOUT) {
+          setLocationPermissionError(
+            "Could not get your current location in time. Please try again or enter your location manually."
+          );
+        } else {
+          setLocationPermissionError(
+            "Unable to detect your current location. Please try again or enter your location manually."
+          );
+        }
         setIsLocating(false);
       },
       { enableHighAccuracy: true, maximumAge: 60000, timeout: 12000 }
@@ -645,7 +700,15 @@ export default function Profile() {
                     />
                     <Input
                       value={profile.location}
-                      onChange={(event) => setProfile((prev) => ({ ...prev, location: event.target.value }))}
+                      onChange={(event) => {
+                        setLocationPermissionError("");
+                        setProfile((prev) => ({
+                          ...prev,
+                          location: event.target.value,
+                          longitude: undefined,
+                          latitude: undefined,
+                        }));
+                      }}
                       placeholder="City"
                     />
                   </div>
@@ -653,7 +716,7 @@ export default function Profile() {
                     <span className="text-muted-foreground">
                       {profile.longitude !== undefined && profile.latitude !== undefined
                         ? `GPS: ${profile.latitude.toFixed(6)}, ${profile.longitude.toFixed(6)}`
-                        : "Chua co toa do GPS"}
+                        : "No GPS coordinates yet"}
                     </span>
                     <Button
                       type="button"
@@ -738,6 +801,37 @@ export default function Profile() {
               <p className="text-xs text-muted-foreground mt-2">
                 Complete your profile to get more matches!
               </p>
+            </div>
+
+            <div className="mb-6 rounded-xl border border-border bg-muted/20 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-muted-foreground">Premium status</p>
+                  <p className="font-semibold text-foreground">
+                    {profile.premiumActive
+                      ? `${formatPremiumPlanLabel(profile.premiumPlan)} plan active`
+                      : "Free plan"}
+                  </p>
+                  {profile.premiumActive && profile.premiumExpiresAt && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Expires on {formatPremiumExpiry(profile.premiumExpiresAt)}
+                    </p>
+                  )}
+                </div>
+                <Badge
+                  className={profile.premiumActive ? "gradient-primary border-0" : ""}
+                  variant={profile.premiumActive ? "default" : "secondary"}
+                >
+                  {profile.premiumActive ? formatPremiumPlanLabel(profile.premiumPlan) : "Free"}
+                </Badge>
+              </div>
+              <Button
+                className="mt-3 w-full"
+                variant={profile.premiumActive ? "outline" : "gradient"}
+                onClick={() => navigate("/premium")}
+              >
+                {profile.premiumActive ? "Manage premium" : "Upgrade to premium"}
+              </Button>
             </div>
 
             {/* Photo Gallery */}
@@ -878,6 +972,9 @@ export default function Profile() {
                   className="w-full p-4 flex items-center gap-3 hover:bg-secondary/50 transition-colors"
                   onClick={() => {
                     if (item.href === "/notifications") {
+                      navigate(item.href);
+                    }
+                    if (item.href === "/premium") {
                       navigate(item.href);
                     }
                     if (item.href === "#edit") {

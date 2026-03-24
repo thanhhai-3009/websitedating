@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import com.example.websitedating.dto.ChatMessage;
 import com.example.websitedating.models.Chat;
 import com.example.websitedating.repository.ChatRepository;
+import com.example.websitedating.repository.UserRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -20,10 +21,16 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class ChatServiceTest {
     @Mock
     private ChatRepository chatRepository;
+    @Mock
+    private NotificationService notificationService;
+    @Mock
+    private UserRepository userRepository;
+    @Mock
+    private WebSocketPresenceService webSocketPresenceService;
     private ChatService chatService;
     @BeforeEach
     void setUp() {
-        chatService = new ChatService(chatRepository);
+        chatService = new ChatService(chatRepository, notificationService, userRepository, webSocketPresenceService);
     }
     @Test
     void saveIncomingMessage_appendsToRoom() {

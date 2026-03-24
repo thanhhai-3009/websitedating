@@ -14,7 +14,9 @@ interface MatchCardProps {
   };
   isNew?: boolean;
   onClick?: () => void;
-  onMessage?: (userId: string) => void;
+  onAction?: (userId: string) => void;
+  actionLabel?: string;
+  actionDisabled?: boolean;
   className?: string;
 }
 
@@ -22,7 +24,9 @@ export const MatchCard = ({
   user,
   isNew = false,
   onClick,
-  onMessage,
+  onAction,
+  actionLabel = "Message",
+  actionDisabled = false,
   className,
 }: MatchCardProps) => {
   return (
@@ -68,18 +72,19 @@ export const MatchCard = ({
         )}
       </div>
 
-      {/* Message Button */}
+      {/* Primary Action Button */}
       <Button
         size="sm"
         variant="soft"
         className="mt-3 gap-1"
+        disabled={actionDisabled}
         onClick={(e) => {
           e.stopPropagation();
-          onMessage?.(user.id);
+          onAction?.(user.id);
         }}
       >
         <MessageCircle className="w-4 h-4" />
-        Message
+        {actionLabel}
       </Button>
     </motion.div>
   );

@@ -18,6 +18,7 @@ public class DiscoverUserResponse {
     private Double distanceKm;
     private Double score;
     private List<ReasonTag> reasonTags;
+    private String clerkId;
 
     public String getUserId() {
         return userId;
@@ -117,6 +118,14 @@ public class DiscoverUserResponse {
 
     public List<ReasonTag> getReasonTags() {
         return reasonTags;
+    }
+
+    public String getClerkId() {
+        return clerkId;
+    }
+
+    public void setClerkId(String clerkId) {
+        this.clerkId = clerkId;
     }
 
     public void setReasonTags(List<ReasonTag> reasonTags) {

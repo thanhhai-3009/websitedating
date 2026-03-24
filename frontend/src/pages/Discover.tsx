@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Filter, Sparkles } from "lucide-react";
 import { useUser } from "@clerk/clerk-react";
+import { useNavigate } from "react-router-dom";
 import { Layout } from "@/components/layout/Layout";
 import { ProfileCard } from "@/components/cards/ProfileCard";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 type DiscoverCandidate = {
   userId: string;
@@ -55,6 +57,8 @@ const saveSeenUserIds = (clerkId: string, userIds: string[]) => {
 
 export default function Discover() {
   const { user } = useUser();
+  const { user: currentAccount } = useCurrentUser();
+  const navigate = useNavigate();
   const [users, setUsers] = useState<DiscoverCandidate[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [useLocationFilter, setUseLocationFilter] = useState(false);
@@ -64,13 +68,15 @@ export default function Discover() {
   const [fetchError, setFetchError] = useState("");
   const { toast } = useToast();
 
+  const isPremiumUser = Boolean(currentAccount?.premiumActive);
+
   const activeFilter: DiscoverFilter = useLocationFilter
     ? "location"
     : useInterestFilter
       ? "interests"
       : "natural";
 
-  const currentUser = users[currentIndex];
+  const currentCandidate = users[currentIndex];
 
   const getCurrentPosition = () =>
     new Promise<{ latitude: number; longitude: number }>((resolve, reject) => {
@@ -104,6 +110,9 @@ export default function Discover() {
         let endpoint = recommendationsEndpoint;
 
         if (activeFilter === "location") {
+          if (!isPremiumUser) {
+            throw new Error("Nearby GPS discovery is available for Premium only.");
+          }
           const position = await getCurrentPosition();
           endpoint = `/api/discovery/nearby?clerkId=${encodeURIComponent(clerkId)}&longitude=${position.longitude}&latitude=${position.latitude}&radiusKm=40&limit=40`;
         } else if (activeFilter === "interests") {
@@ -151,7 +160,30 @@ export default function Discover() {
     return () => {
       cancelled = true;
     };
-  }, [activeFilter, user?.id]);
+  }, [activeFilter, isPremiumUser, user?.id]);
+
+  const handleLocationFilterChange = (checked: boolean) => {
+    if (checked && !isPremiumUser) {
+      setUseLocationFilter(false);
+      toast({
+        title: "Premium required",
+        description: "Upgrade to Premium to use GPS nearby discovery.",
+      });
+      navigate("/premium");
+      return;
+    }
+    setUseLocationFilter(checked);
+    if (checked) {
+      setUseInterestFilter(false);
+    }
+  };
+
+  const handleInterestFilterChange = (checked: boolean) => {
+    setUseInterestFilter(checked);
+    if (checked) {
+      setUseLocationFilter(false);
+    }
+  };
 
   const markSeenIfNatural = (userId: string) => {
     if (!user?.id || activeFilter !== "natural") return;
@@ -161,25 +193,25 @@ export default function Discover() {
   };
 
   const currentCard = useMemo(() => {
-    if (!currentUser) return null;
+    if (!currentCandidate) return null;
     return {
-      id: currentUser.userId,
-      name: currentUser.displayName,
-      age: currentUser.age ?? 0,
-      location: currentUser.location || "Unknown location",
-      bio: currentUser.bio || "",
+      id: currentCandidate.userId,
+      name: currentCandidate.displayName,
+      age: currentCandidate.age ?? 0,
+      location: currentCandidate.location || "Unknown location",
+      bio: currentCandidate.bio || "",
       image:
-        currentUser.avatarUrl && currentUser.avatarUrl.trim().length > 0
-          ? currentUser.avatarUrl
+        currentCandidate.avatarUrl && currentCandidate.avatarUrl.trim().length > 0
+          ? currentCandidate.avatarUrl
           : "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=500&fit=crop",
-      interests: currentUser.interests || [],
-      verified: Boolean(currentUser.verified),
+      interests: currentCandidate.interests || [],
+      verified: Boolean(currentCandidate.verified),
       distance:
-        typeof currentUser.distanceKm === "number"
-          ? `${currentUser.distanceKm.toFixed(1)} km away`
+        typeof currentCandidate.distanceKm === "number"
+          ? `${currentCandidate.distanceKm.toFixed(1)} km away`
           : undefined,
     };
-  }, [currentUser]);
+  }, [currentCandidate]);
 
   const nextCard = () => {
     setTimeout(() => {
@@ -192,47 +224,35 @@ export default function Discover() {
     actionType: "like" | "pass" | "match",
     interactionType?: "like" | "match_invite"
   ) => {
-    if (!user?.id || !currentUser) return;
+    if (!user?.id || !currentCandidate) return;
     await fetch("/api/discovery/interactions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         clerkId: user.id,
-        targetUserId: currentUser.userId,
+        targetUserId: currentCandidate.userId,
         actionType,
         interactionType,
       }),
     });
   };
 
-  const handleLike = () => {
-    if (!currentUser) return;
-    markSeenIfNatural(currentUser.userId);
-    setDirection("right");
-    recordInteraction("like", "match_invite").catch(() => null);
-    toast({
-      title: "Invite sent to " + currentUser.displayName,
-      description: "Wait for them to accept your invite to become a match.",
-    });
-    nextCard();
-  };
-
   const handlePass = () => {
-    if (!currentUser) return;
-    markSeenIfNatural(currentUser.userId);
+    if (!currentCandidate) return;
+    markSeenIfNatural(currentCandidate.userId);
     setDirection("left");
     recordInteraction("pass").catch(() => null);
     nextCard();
   };
 
-  const handleSuperLike = () => {
-    if (!currentUser) return;
-    markSeenIfNatural(currentUser.userId);
+  const handleMatch = () => {
+    if (!currentCandidate) return;
+    markSeenIfNatural(currentCandidate.userId);
     setDirection("right");
     recordInteraction("like", "match_invite").catch(() => null);
     toast({
-      title: "⭐ Super Like sent to " + currentUser.displayName + "!",
-      description: "They'll see you at the top of their list.",
+      title: "Match request sent to " + currentCandidate.displayName,
+      description: "They can match back from their Matches list.",
     });
     nextCard();
   };
@@ -264,13 +284,13 @@ export default function Discover() {
                 <DropdownMenuSeparator />
                 <DropdownMenuCheckboxItem
                   checked={useLocationFilter}
-                  onCheckedChange={(checked) => setUseLocationFilter(Boolean(checked))}
+                  onCheckedChange={(checked) => handleLocationFilterChange(Boolean(checked))}
                 >
                   Location
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem
                   checked={useInterestFilter}
-                  onCheckedChange={(checked) => setUseInterestFilter(Boolean(checked))}
+                  onCheckedChange={(checked) => handleInterestFilterChange(Boolean(checked))}
                 >
                   Interests
                 </DropdownMenuCheckboxItem>
@@ -303,9 +323,8 @@ export default function Discover() {
                   >
                     <ProfileCard
                       user={currentCard}
-                      onLike={handleLike}
+                      onMatch={handleMatch}
                       onPass={handlePass}
-                      onSuperLike={handleSuperLike}
                     />
                   </motion.div>
                 </AnimatePresence>
@@ -315,9 +334,8 @@ export default function Discover() {
 
           {/* Instructions */}
           <div className="flex items-center justify-center gap-8 text-sm text-muted-foreground mt-4">
-            <span>← Pass</span>
-            <span>⭐ Super Like</span>
-            <span>Like →</span>
+            <span>Pass</span>
+            <span>Match</span>
           </div>
         </div>
       </div>
