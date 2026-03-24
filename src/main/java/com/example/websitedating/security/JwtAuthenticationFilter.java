@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 import java.util.Locale;
+import java.time.Instant;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -71,7 +72,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             Optional<User> userOpt = userRepository.findByEmailIgnoreCase(email);
             if (userOpt.isPresent() && jwtService.isTokenValid(token, userOpt.get().getEmail())) {
-                setAuthentication(userOpt.get().getEmail(), request);
+                User user = userOpt.get();
+                if (user.getAccountLockedUntil() != null && user.getAccountLockedUntil().isAfter(Instant.now())) {
+                    // Tài khoản đang bị khóa
+                    return false;
+                }
+                setAuthentication(user.getEmail(), request);
                 return true;
             }
         } catch (Exception ignored) {
@@ -96,9 +102,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        String principalName = userOpt.get().getClerkId() != null && !userOpt.get().getClerkId().isBlank()
-                ? userOpt.get().getClerkId()
-                : userOpt.get().getEmail();
+        User user = userOpt.get();
+        if (user.getAccountLockedUntil() != null && user.getAccountLockedUntil().isAfter(Instant.now())) {
+            // Tài khoản đang bị khóa
+            return;
+        }
+
+        String principalName = user.getClerkId() != null && !user.getClerkId().isBlank()
+                ? user.getClerkId()
+                : user.getEmail();
         setAuthentication(principalName, request);
     }
 

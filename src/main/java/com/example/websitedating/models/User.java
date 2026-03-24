@@ -53,6 +53,7 @@ public class User {
     private Boolean flaggedForReview;
     private Integer fakePhotoReports = 0;
     private Integer noShowCount = 0;
+    private Instant accountLockedUntil;
 
     @CreatedDate
     private Instant createdAt;
@@ -105,6 +106,9 @@ public class User {
         private List<String> preferredInterests;
         private String relationshipGoal;
         private IntRange budgetRange;
+        // IDs of users reviewer wants similar suggestions to (from wantSimilar=true reviews)
+        @Builder.Default
+        private List<String> preferredSimilarUserIds = new java.util.ArrayList<>();
     }
 
     @Data

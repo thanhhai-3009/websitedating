@@ -1,12 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useReviewedAppointments } from "@/hooks/useReviewedAppointments";
 import { motion, AnimatePresence } from "framer-motion";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { ArrowLeft, Check, ShieldAlert, UserX } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ArrowLeft, Check, Loader2, ShieldAlert, UserX } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import axios from "axios";
@@ -14,14 +14,26 @@ import { useAuth } from "@clerk/clerk-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 
-// ─── Mock data (replace with API call using appointmentId) ───────────────────
-const MOCK_APPOINTMENTS: Record<string, { name: string; initials: string; spot: string; date: string }> = {
-  "3": { name: "Olivia M.", initials: "OM", spot: "Botanical Gardens", date: "Mar 10" },
-};
+// ─── Types ───────────────────────────────────────────────────────────────────
+interface AppointmentInfo {
+  id: string;
+  matchName: string;
+  matchInitials: string;
+  matchAvatarUrl?: string;
+  matchUserId: string;
+  spot: string;
+  date: string;
+}
 
 // ─── Behaviour tags ──────────────────────────────────────────────────────────
 const POSITIVE_TAGS = ["Lịch sự/Tôn trọng", "Nói chuyện cuốn hút"];
 const NEGATIVE_TAGS = ["Thô lỗ", "Quấy rối/Ép buộc"];
+const TAG_API_MAP: Record<string, string> = {
+  "Lịch sự/Tôn trọng": "polite",
+  "Nói chuyện cuốn hút": "engaging",
+  "Thô lỗ": "rude",
+  "Quấy rối/Ép buộc": "harass",
+};
 
 type PhotoMatch = "90-100" | "50-80" | "under50" | null;
 type WhoAbsent = "them" | "me" | null;
@@ -41,18 +53,77 @@ const DateReview = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { userId: clerkId } = useAuth();
+  const { getToken } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { isReviewed, markReviewed } = useReviewedAppointments();
-  const aptId = Number(id);
-
-  const apt = MOCK_APPOINTMENTS[id ?? ""] ?? {
-    name: "Người dùng",
-    initials: "??",
+  // ── Load appointment info from API ───────────────────────────────────────
+  const [apt, setApt] = useState<AppointmentInfo>({
+    id: id ?? "",
+    matchName: "Người dùng",
+    matchInitials: "??",
+    matchUserId: "",
     spot: "—",
     date: "—",
-  };
+  });
+  const [aptLoading, setAptLoading] = useState(true);
+
+  useEffect(() => {
+    if (!id) return;
+    const load = async () => {
+      try {
+        const token = await getToken();
+        const res = await axios.get(`${API_BASE_URL}/api/appointments/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = res.data;
+        // Map backend Appointment → AppointmentInfo
+        const otherParty = data.creatorName ?? data.participantName ?? "Người dùng";
+        const otherUserId = data.participantId ?? data.creatorId ?? "";
+        const scheduledDate = data.scheduledTime
+          ? new Date(data.scheduledTime).toLocaleDateString("vi-VN")
+          : "—";
+        const words: string[] = otherParty.split(" ");
+        const initials = words.length >= 2
+          ? words[0][0] + words[words.length - 1][0]
+          : otherParty.slice(0, 2);
+        setApt({
+          id,
+          matchName: otherParty,
+          matchInitials: initials.toUpperCase(),
+          matchAvatarUrl: data.participantAvatarUrl ?? data.creatorAvatarUrl,
+          matchUserId: otherUserId,
+          spot: data.location?.placeName ?? "—",
+          date: scheduledDate,
+        });
+      } catch (err) {
+        console.warn("[DateReview] Could not load appointment from API, using defaults.", err);
+      } finally {
+        setAptLoading(false);
+      }
+    };
+    load();
+  }, [id, getToken]);
+
+  // ── Double-blind: check from backend too ────────────────────────────────
+  const { isReviewed, markReviewed } = useReviewedAppointments();
+  const [serverReviewed, setServerReviewed] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    const check = async () => {
+      try {
+        const token = await getToken();
+        const res = await axios.get(`${API_BASE_URL}/api/reviews/check`, {
+          params: { appointmentId: id },
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.data?.hasReviewed) setServerReviewed(true);
+      } catch {
+        // silent – localhost check is fallback
+      }
+    };
+    check();
+  }, [id, getToken]);
 
   const [step, setStep] = useState<Step>("meet");
   const [submitted, setSubmitted] = useState(false);
@@ -77,7 +148,7 @@ const DateReview = () => {
     if (idx < STEPS.length - 1) setStep(STEPS[idx + 1]);
   };
 
-  // ─── Compute backend payload (double-blind: never exposed to other user) ──
+  // ─── Build payload (reviewerUserId omitted – backend reads from JWT) ─────
   const buildPayload = () => {
     const hasHarassment = state.behaviourTags.includes("Quấy rối/Ép buộc");
     const hasRude = state.behaviourTags.includes("Thô lỗ");
@@ -92,14 +163,15 @@ const DateReview = () => {
 
     return {
       appointmentId: String(id),
-      reviewedUserId: apt.name, // replace with actual userId from API
-      reviewerUserId: clerkId,
+      reviewedUserId: apt.matchUserId,   // real userId from API
+      // reviewerUserId: intentionally omitted – backend extracts from JWT
       didMeet: state.didMeet,
-      whoAbsent: state.whoAbsent,           // backend deducts reputation from absent party
-      photoMatch: state.photoMatch,          // backend flags profile if under50
-      behaviourTags: state.behaviourTags,
+      whoAbsent: state.whoAbsent,
+      photoMatch: state.photoMatch,
+      // Map display tags → backend enum keys
+      behaviourTags: state.behaviourTags.map((t) => TAG_API_MAP[t] ?? t),
       wantSimilar: state.wantSimilar,
-      verdict,                               // backend acts: boost / suggest / lock 1mo / lock permanent
+      verdict,
     };
   };
 
@@ -108,25 +180,34 @@ const DateReview = () => {
       toast({ title: "Vui lòng trả lời câu hỏi cuối", variant: "destructive" });
       return;
     }
-    
+
     setIsSubmitting(true);
-    const payload = buildPayload();
-    
     try {
-      await axios.post(`${API_BASE_URL}/api/reviews`, payload);
-      markReviewed(aptId);
+      const token = await getToken();
+      const payload = buildPayload();
+
+      await axios.post(`${API_BASE_URL}/api/reviews`, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      markReviewed(Number(id));
       setSubmitted(true);
-      toast({ title: "Đã gửi đánh giá! 💕", description: "Cảm ơn bạn đã giúp cộng đồng an toàn hơn." });
-    } catch (error) {
-      console.error("[DateReview] Submit review error", error);
-      toast({ title: "Lỗi hệ thống", description: "Không thể gửi đánh giá, vui lòng thử lại.", variant: "destructive" });
+      toast({
+        title: "Đã gửi đánh giá! 💕",
+        description: "Cảm ơn bạn đã giúp cộng đồng an toàn hơn.",
+      });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error ?? "Không thể gửi đánh giá, vui lòng thử lại.";
+      toast({ title: "Lỗi hệ thống", description: msg, variant: "destructive" });
+      console.error("[DateReview] Submit error:", error);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // ─── Already reviewed guard ───────────────────────────────────────────────
-  if (!submitted && isReviewed(aptId)) {
+  // ─── Already reviewed (localStorage OR server) ────────────────────────────
+  const alreadyDone = !submitted && (isReviewed(Number(id)) || serverReviewed);
+  if (alreadyDone) {
     return (
       <Layout isAuthenticated>
         <div className="container mx-auto px-4 py-16 flex items-center justify-center min-h-[60vh]">
@@ -147,7 +228,7 @@ const DateReview = () => {
     );
   }
 
-  // ─── Success screen ───────────────────────────────────────────────────────
+  // ─── Success screen ────────────────────────────────────────────────────────
   if (submitted) {
     return (
       <Layout isAuthenticated>
@@ -190,10 +271,13 @@ const DateReview = () => {
           <Card className="gradient-card mb-6">
             <CardContent className="p-4 flex items-center gap-4">
               <Avatar className="h-12 w-12">
-                <AvatarFallback className="gradient-primary text-primary-foreground">{apt.initials}</AvatarFallback>
+                {apt.matchAvatarUrl && <AvatarImage src={apt.matchAvatarUrl} alt={apt.matchName} />}
+                <AvatarFallback className="gradient-primary text-primary-foreground">
+                  {aptLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : apt.matchInitials}
+                </AvatarFallback>
               </Avatar>
               <div>
-                <p className="font-serif font-semibold text-foreground">{apt.name}</p>
+                <p className="font-serif font-semibold text-foreground">{apt.matchName}</p>
                 <p className="text-sm text-muted-foreground">{apt.spot} · {apt.date}</p>
               </div>
             </CardContent>
@@ -219,7 +303,7 @@ const DateReview = () => {
                 <Card className="gradient-card">
                   <CardHeader>
                     <CardTitle className="font-serif text-lg">
-                      Bạn và <span className="text-primary">{apt.name}</span> có gặp nhau ngoài đời không?
+                      Bạn và <span className="text-primary">{apt.matchName}</span> có gặp nhau ngoài đời không?
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
@@ -248,7 +332,7 @@ const DateReview = () => {
                             className="flex-1"
                             onClick={() => { setState((p) => ({ ...p, whoAbsent: "them" })); next(); }}
                           >
-                            <UserX className="w-4 h-4 mr-1" />{apt.name} không đến
+                            <UserX className="w-4 h-4 mr-1" />{apt.matchName} không đến
                           </Button>
                           <Button
                             size="sm"
@@ -272,7 +356,7 @@ const DateReview = () => {
                 <Card className="gradient-card">
                   <CardHeader>
                     <CardTitle className="font-serif text-lg">
-                      Ảnh đại diện của <span className="text-primary">{apt.name}</span> giống thực tế bao nhiêu?
+                      Ảnh đại diện của <span className="text-primary">{apt.matchName}</span> giống thực tế bao nhiêu?
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
@@ -307,7 +391,7 @@ const DateReview = () => {
                 <Card className="gradient-card">
                   <CardHeader>
                     <CardTitle className="font-serif text-lg">
-                      Chọn các đặc điểm bạn thấy ở <span className="text-primary">{apt.name}</span>
+                      Chọn các đặc điểm bạn thấy ở <span className="text-primary">{apt.matchName}</span>
                     </CardTitle>
                     <p className="text-xs text-muted-foreground">Có thể chọn nhiều mục</p>
                   </CardHeader>
@@ -348,7 +432,7 @@ const DateReview = () => {
                   <CardHeader>
                     <CardTitle className="font-serif text-lg">
                       Bạn có muốn hệ thống tiếp tục gợi ý những người như{" "}
-                      <span className="text-primary">{apt.name}</span> cho bạn không?
+                      <span className="text-primary">{apt.matchName}</span> cho bạn không?
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
@@ -372,7 +456,11 @@ const DateReview = () => {
                       disabled={state.wantSimilar === null || isSubmitting}
                       onClick={handleSubmit}
                     >
-                      {isSubmitting ? "Đang gửi..." : "Gửi đánh giá"}
+                      {isSubmitting ? (
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Đang gửi...</>
+                      ) : (
+                        "Gửi đánh giá"
+                      )}
                     </Button>
                   </CardContent>
                 </Card>

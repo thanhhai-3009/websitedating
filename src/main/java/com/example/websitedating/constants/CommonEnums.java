@@ -18,7 +18,8 @@ public class CommonEnums {
 
     public enum NotificationType {
         new_message, new_match, upcoming_appointment, connection_liked,
-        connection_request, appointment_updated, video_call_incoming, system
+        connection_request, appointment_updated, video_call_incoming, system,
+        review_reminder, profile_update_suggestion
     }
     public enum NotificationChannel { in_app, push, email }
 
