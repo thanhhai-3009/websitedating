@@ -15,6 +15,7 @@ type DiscoverCandidate = {
   online?: boolean;
   matchedAt?: string;
   status?: string;
+  likedByMe?: boolean;
 };
 
 type MatchViewModel = {
@@ -25,6 +26,7 @@ type MatchViewModel = {
   lastActive?: string;
   isOnline?: boolean;
   status: "liked" | "matched" | "accepted";
+  likedByMe: boolean;
   isNew: boolean;
 };
 
@@ -51,7 +53,7 @@ export default function Matches() {
       setFetchError("");
 
       try {
-        const response = await fetch(`/api/discovery/matches?clerkId=${encodeURIComponent(clerkId)}&limit=50&includeLiked=true`);
+        const response = await fetch(`/api/discovery/matches?clerkId=${encodeURIComponent(clerkId)}&limit=50&includeLiked=true&includeSentLiked=true`);
         if (!response.ok) {
           const data = (await response.json().catch(() => ({}))) as { message?: string };
           if (!cancelled) {
@@ -79,6 +81,7 @@ export default function Matches() {
           lastActive: candidate.online ? "Online now" : "Recently active",
           isOnline: Boolean(candidate.online),
           status: toStatus(candidate.status),
+          likedByMe: Boolean(candidate.likedByMe),
           isNew:
             typeof candidate.matchedAt === "string"
               ? Date.now() - new Date(candidate.matchedAt).getTime() < 3 * 24 * 60 * 60 * 1000
@@ -143,7 +146,8 @@ export default function Matches() {
     }
   };
 
-  const likedYou = useMemo(() => matches.filter((m) => m.status === "liked"), [matches]);
+  const likedYou = useMemo(() => matches.filter((m) => m.status === "liked" && !m.likedByMe), [matches]);
+  const pendingSentInvites = useMemo(() => matches.filter((m) => m.status === "liked" && m.likedByMe), [matches]);
   const newMatches = useMemo(() => matches.filter((m) => m.status !== "liked" && m.isNew), [matches]);
   const allMatches = useMemo(() => matches.filter((m) => m.status !== "liked" && !m.isNew), [matches]);
 
@@ -163,7 +167,7 @@ export default function Matches() {
           </div>
 
           <Tabs defaultValue="matches" className="space-y-6">
-            <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsList className="grid w-full max-w-2xl grid-cols-3">
               <TabsTrigger value="matches" className="gap-2">
                 <Heart className="w-4 h-4" />
                 Matches ({newMatches.length + allMatches.length})
@@ -171,6 +175,10 @@ export default function Matches() {
               <TabsTrigger value="likes" className="gap-2">
                 <Sparkles className="w-4 h-4" />
                 Likes ({likedYou.length})
+              </TabsTrigger>
+              <TabsTrigger value="sent" className="gap-2">
+                <Sparkles className="w-4 h-4" />
+                Sent ({pendingSentInvites.length})
               </TabsTrigger>
             </TabsList>
 
@@ -281,6 +289,37 @@ export default function Matches() {
                       />
                     </motion.div>
                   ))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="sent">
+              {loading && <p className="text-center text-muted-foreground">Loading sent invites...</p>}
+              {!loading && fetchError && <p className="text-center text-destructive">{fetchError}</p>}
+              {!loading && !fetchError && pendingSentInvites.length === 0 && (
+                <p className="text-center text-muted-foreground">You have no pending invites right now.</p>
+              )}
+              {!loading && !fetchError && pendingSentInvites.length > 0 && (
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    These users received your match request and are waiting to accept.
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                    {pendingSentInvites.map((match, i) => (
+                      <motion.div
+                        key={match.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.05 }}
+                      >
+                        <MatchCard
+                          user={match}
+                          actionLabel="Pending"
+                          actionDisabled
+                        />
+                      </motion.div>
+                    ))}
+                  </div>
                 </div>
               )}
             </TabsContent>

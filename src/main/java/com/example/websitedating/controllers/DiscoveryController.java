@@ -47,8 +47,9 @@ public class DiscoveryController {
     public List<MatchResponse> matches(
             @RequestParam String clerkId,
             @RequestParam(required = false) Integer limit,
-            @RequestParam(required = false, defaultValue = "false") Boolean includeLiked) {
-        return discoveryService.matches(clerkId, limit, includeLiked);
+            @RequestParam(required = false, defaultValue = "false") Boolean includeLiked,
+            @RequestParam(required = false, defaultValue = "false") Boolean includeSentLiked) {
+        return discoveryService.matches(clerkId, limit, includeLiked, includeSentLiked);
     }
 
     @PostMapping("/interactions")

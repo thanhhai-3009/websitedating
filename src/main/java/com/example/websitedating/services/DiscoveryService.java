@@ -133,18 +133,20 @@ public class DiscoveryService {
                 .toList();
     }
 
-    public List<MatchResponse> matches(String clerkId, Integer limit, Boolean includeLiked) {
+    public List<MatchResponse> matches(String clerkId, Integer limit, Boolean includeLiked, Boolean includeSentLiked) {
         User me = findByClerkId(clerkId);
         int effectiveLimit = limit == null || limit <= 0 ? 50 : Math.min(limit, 100);
         boolean shouldIncludeLiked = Boolean.TRUE.equals(includeLiked);
+        boolean shouldIncludeSentLiked = Boolean.TRUE.equals(includeSentLiked);
 
         List<Connection> orderedConnections = connectionRepository.findBySenderIdOrReceiverId(me.getId(), me.getId()).stream()
-                .filter(connection -> isVisibleInMatches(connection, me.getId(), shouldIncludeLiked))
+                .filter(connection -> isVisibleInMatches(connection, me.getId(), shouldIncludeLiked, shouldIncludeSentLiked))
                 .sorted(Comparator.comparing(this::connectionTimestamp, Comparator.nullsLast(Comparator.naturalOrder())).reversed())
                 .toList();
 
         LinkedHashMap<String, Instant> counterpartMatchedAt = new LinkedHashMap<>();
         LinkedHashMap<String, ConnectionStatus> counterpartStatus = new LinkedHashMap<>();
+        LinkedHashMap<String, Boolean> counterpartLikedByMe = new LinkedHashMap<>();
         for (Connection connection : orderedConnections) {
             String counterpartId = me.getId().equals(connection.getSenderId())
                     ? connection.getReceiverId()
@@ -152,6 +154,7 @@ public class DiscoveryService {
             if (counterpartId != null && !counterpartId.isBlank()) {
                 counterpartMatchedAt.putIfAbsent(counterpartId, connectionTimestamp(connection));
                 counterpartStatus.putIfAbsent(counterpartId, connection.getStatus());
+                counterpartLikedByMe.putIfAbsent(counterpartId, me.getId().equals(connection.getSenderId()));
             }
         }
 
@@ -174,7 +177,8 @@ public class DiscoveryService {
                             candidate,
                             entry.getValue(),
                             buildDirectRoomId(me.getId(), candidate.getId()),
-                            counterpartStatus.get(entry.getKey()));
+                            counterpartStatus.get(entry.getKey()),
+                            Boolean.TRUE.equals(counterpartLikedByMe.get(entry.getKey())));
                 })
                 .filter(value -> value != null)
                 .limit(effectiveLimit)
@@ -316,15 +320,18 @@ public class DiscoveryService {
         emitLikeNotification(senderId, receiverId);
     }
 
-    private boolean isVisibleInMatches(Connection connection, String meId, boolean includeLiked) {
+    private boolean isVisibleInMatches(Connection connection, String meId, boolean includeLiked, boolean includeSentLiked) {
         ConnectionStatus status = connection.getStatus();
         if (status == ConnectionStatus.matched || status == ConnectionStatus.accepted) {
             return true;
         }
-        return includeLiked
-                && status == ConnectionStatus.liked
-                && meId != null
-                && meId.equals(connection.getReceiverId());
+        if (status != ConnectionStatus.liked || meId == null) {
+            return false;
+        }
+        if (includeLiked && meId.equals(connection.getReceiverId())) {
+            return true;
+        }
+        return includeSentLiked && meId.equals(connection.getSenderId());
     }
 
     private void emitLikeNotification(String senderId, String receiverId) {
