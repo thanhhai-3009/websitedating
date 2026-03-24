@@ -29,6 +29,8 @@ public class Appointment {
     @Builder.Default private SuggestionSource suggestionSource = SuggestionSource.manual;
     private List<Feedback> feedbacks;
     private String updatedBy;
+    @Builder.Default private Boolean creatorContinued = false;
+    @Builder.Default private Boolean participantContinued = false;
 
     @CreatedDate private Instant createdAt;
     @LastModifiedDate private Instant updatedAt;

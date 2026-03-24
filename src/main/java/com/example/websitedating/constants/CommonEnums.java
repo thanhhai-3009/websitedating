@@ -13,7 +13,7 @@ public class CommonEnums {
 
     public enum VideoCallStatus { ringing, accepted, rejected, missed, ended, failed }
 
-    public enum AppointmentStatus { proposed, scheduled, completed, canceled, rescheduled }
+    public enum AppointmentStatus { proposed, scheduled, completed, canceled, rescheduled, incomplete }
     public enum SuggestionSource { manual, system_recommendation }
 
     public enum NotificationType {

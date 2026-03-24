@@ -21,7 +21,12 @@ interface Appointment {
   location: string;
   date: string;
   time: string;
-  status: "confirmed" | "pending" | "completed" | "cancelled";
+  status: "confirmed" | "pending" | "completed" | "cancelled" | "incomplete";
+  creatorId?: string | null;
+  participantId?: string | null;
+  scheduledISO?: string | null;
+  creatorContinued?: boolean;
+  participantContinued?: boolean;
   note?: string;
 }
 
@@ -108,6 +113,11 @@ const Appointments = () => {
           date: scheduled ? format(scheduled, "PPP") : "",
           time: scheduled ? format(scheduled, "p") : "",
           status: mapBackendToUI(it.status),
+          creatorId: it.creatorId || null,
+          participantId: it.participantId || null,
+          scheduledISO: it.scheduledTime || null,
+          creatorContinued: !!it.creatorContinued,
+          participantContinued: !!it.participantContinued,
           note: it.note || it.description || "",
         } as Appointment;
       });
@@ -119,8 +129,23 @@ const Appointments = () => {
 
   useEffect(() => { fetchAppointments(); }, [user]);
 
-  const upcoming = appointments.filter(a => a.status === "confirmed" || a.status === "pending");
-  const past = appointments.filter(a => a.status === "completed" || a.status === "cancelled");
+  const now = new Date();
+
+  const parseISO = (s?: string | null) => s ? new Date(s) : null;
+  const addHours = (d: Date, h: number) => new Date(d.getTime() + h * 60 * 60 * 1000);
+
+  // classify upcoming vs past with some derived rules:
+  // - proposed/pending where scheduledTime passed -> treat as past
+  // - otherwise confirmed/pending -> upcoming
+  const upcoming = appointments.filter(a => {
+    const sched = parseISO(a.scheduledISO);
+    if (!sched) return a.status === 'confirmed' || a.status === 'pending';
+    if (a.status === 'pending' && now > sched) return false; // move to past
+    return a.status === 'confirmed' || a.status === 'pending' || a.status === 'incomplete';
+  });
+  const past = appointments.filter(a => {
+    return a.status === 'completed' || a.status === 'cancelled' || (a.status === 'pending' && a.scheduledISO && now > new Date(a.scheduledISO));
+  });
 
   const handleCancel = () => {
     if (!cancelId) return;
@@ -165,44 +190,146 @@ const Appointments = () => {
               )}
               {showActions && (
                 <div className="flex gap-2 mt-3">
-                  <Button size="sm" variant="outline" className="gap-1" onClick={async () => {
-                    try {
-                      const res = await fetch(`/api/appointments/${encodeURIComponent(apt.id)}`);
-                      if (!res.ok) throw new Error('Failed to load appointment');
-                      const data = await res.json();
-                          setEditAptRaw(data);
-                          // resolve participant name from matchedUsers (if available)
-                          const pid = data?.participantId ? String(data.participantId) : null;
-                          if (pid) {
-                            const found = (matchedUsers || []).find((m:any) => String(m.clerkId ?? m.userId ?? m.id) === pid);
-                            setEditParticipantName(found ? (found.displayName || found.username || found.name) : pid);
-                          } else {
-                            setEditParticipantName(null);
-                          }
-                      // map backend status to UI status for selection
-                      const ui = (s: any) => {
-                        if (!s) return 'pending';
-                        const st = String(s).toLowerCase();
-                        if (st === 'scheduled') return 'confirmed';
-                        if (st === 'proposed') return 'pending';
-                        if (st === 'canceled' || st === 'cancelled') return 'cancelled';
-                        return st;
-                      };
-                      setEditUiStatus(ui(data.status));
-                    } catch (e) {
-                      console.error(e);
-                      toast({ title: 'Error', description: 'Could not load appointment for editing.', variant: 'destructive' });
+                  {/* role-based actions */}
+                  {(() => {
+                    const sched = parseISO(apt.scheduledISO);
+                    const isCreator = user?.id && apt.creatorId && String(user.id) === String(apt.creatorId);
+                    const isParticipant = user?.id && apt.participantId && String(user.id) === String(apt.participantId);
+
+                    const acceptAppointment = async (id: string) => {
+                      try {
+                        const resGet = await fetch(`/api/appointments/${encodeURIComponent(id)}`);
+                        if (!resGet.ok) throw new Error('Failed to load appointment');
+                        const data = await resGet.json();
+                        data.status = 'scheduled';
+                        await fetch(`/api/appointments/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+                        toast({ title: 'Accepted', description: 'You accepted the appointment.' });
+                        fetchAppointments();
+                      } catch (e) {
+                        console.error(e);
+                        toast({ title: 'Error', description: 'Could not accept appointment.', variant: 'destructive' });
+                      }
+                    };
+
+                    const sendContinue = async (id: string) => {
+                      try {
+                        const resGet = await fetch(`/api/appointments/${encodeURIComponent(id)}`);
+                        if (!resGet.ok) throw new Error('Failed to load appointment');
+                        const data = await resGet.json();
+                        if (isCreator) data.creatorContinued = true;
+                        if (isParticipant) data.participantContinued = true;
+                        await fetch(`/api/appointments/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+                        toast({ title: 'Tiếp tục', description: 'Cảm ơn, chờ đối phương bấm tiếp tục.' });
+                        fetchAppointments();
+                      } catch (e) {
+                        console.error(e);
+                        toast({ title: 'Error', description: 'Could not send continue.', variant: 'destructive' });
+                      }
+                    };
+
+                    const completeAppointment = async (id: string) => {
+                      try {
+                        const resGet = await fetch(`/api/appointments/${encodeURIComponent(id)}`);
+                        if (!resGet.ok) throw new Error('Failed to load appointment');
+                        const data = await resGet.json();
+                        data.status = 'completed';
+                        await fetch(`/api/appointments/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+                        toast({ title: 'Hoàn thành', description: 'Cảm ơn bạn đã hoàn thành lịch hẹn.' });
+                        fetchAppointments();
+                      } catch (e) {
+                        console.error(e);
+                        toast({ title: 'Error', description: 'Could not complete appointment.', variant: 'destructive' });
+                      }
+                    };
+
+                    // Participant sees accept when proposed/pending
+                    if (apt.status === 'pending' && isParticipant) {
+                      return (
+                        <>
+                          <Button size="sm" variant="outline" className="gap-1" onClick={() => acceptAppointment(apt.id)}><Plus className="w-3.5 h-3.5" />Chấp nhận</Button>
+                          <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
+                            <Trash2 className="w-3.5 h-3.5" />Hủy
+                          </Button>
+                        </>
+                      );
                     }
-                  }}><Edit className="w-3.5 h-3.5" />Edit</Button>
 
-                  <Button size="sm" variant="outline" className="gap-1" onClick={() => {
-                    // navigate to messages, preselect conversation by id
-                    navigate('/messages', { state: { selectedConversationId: apt.matchName } });
-                  }}><MessageCircle className="w-3.5 h-3.5" />Chat</Button>
+                    // Creator sees only cancel while they are the requester
+                    if (apt.status === 'pending' && isCreator) {
+                      return (
+                        <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
+                          <Trash2 className="w-3.5 h-3.5" />Hủy
+                        </Button>
+                      );
+                    }
 
-                  <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
-                    <Trash2 className="w-3.5 h-3.5" />Cancel
-                  </Button>
+                    // At scheduled time both can 'Tiếp tục'
+                    if (apt.status === 'confirmed' || apt.status === 'confirmed') {
+                      const start = sched;
+                      const end = start ? addHours(start, 2) : null;
+                      const userHasContinued = isCreator ? !!apt.creatorContinued : !!apt.participantContinued;
+                      const otherContinued = isCreator ? !!apt.participantContinued : !!apt.creatorContinued;
+
+                      if (start && now >= start && (!userHasContinued)) {
+                        return (
+                          <>
+                            <Button size="sm" variant="outline" className="gap-1" onClick={() => sendContinue(apt.id)}>Tiếp tục</Button>
+                            <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>Hủy</Button>
+                          </>
+                        );
+                      }
+
+                      // if both continued and now after end -> show complete
+                      if (start && end && now > end && apt.creatorContinued && apt.participantContinued) {
+                        return (
+                          <>
+                            <Button size="sm" variant="gradient" className="gap-1" onClick={() => completeAppointment(apt.id)}>Hoàn thành</Button>
+                          </>
+                        );
+                      }
+                    }
+
+                    // default actions: chat + edit + cancel
+                    return (
+                      <>
+                        <Button size="sm" variant="outline" className="gap-1" onClick={async () => {
+                          try {
+                            const res = await fetch(`/api/appointments/${encodeURIComponent(apt.id)}`);
+                            if (!res.ok) throw new Error('Failed to load appointment');
+                            const data = await res.json();
+                                setEditAptRaw(data);
+                                const pid = data?.participantId ? String(data.participantId) : null;
+                                if (pid) {
+                                  const found = (matchedUsers || []).find((m:any) => String(m.clerkId ?? m.userId ?? m.id) === pid);
+                                  setEditParticipantName(found ? (found.displayName || found.username || found.name) : pid);
+                                } else {
+                                  setEditParticipantName(null);
+                                }
+                            const ui = (s: any) => {
+                              if (!s) return 'pending';
+                              const st = String(s).toLowerCase();
+                              if (st === 'scheduled') return 'confirmed';
+                              if (st === 'proposed') return 'pending';
+                              if (st === 'canceled' || st === 'cancelled') return 'cancelled';
+                              return st;
+                            };
+                            setEditUiStatus(ui(data.status));
+                          } catch (e) {
+                            console.error(e);
+                            toast({ title: 'Error', description: 'Could not load appointment for editing.', variant: 'destructive' });
+                          }
+                        }}><Edit className="w-3.5 h-3.5" />Edit</Button>
+
+                        <Button size="sm" variant="outline" className="gap-1" onClick={() => {
+                          navigate('/messages', { state: { selectedConversationId: apt.matchName } });
+                        }}><MessageCircle className="w-3.5 h-3.5" />Chat</Button>
+
+                        <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
+                          <Trash2 className="w-3.5 h-3.5" />Cancel
+                        </Button>
+                      </>
+                    );
+                  })()}
                 </div>
               )}
               {apt.status === "completed" && (
