@@ -35,8 +35,10 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
+
 
 @Service
 public class DiscoveryService {
@@ -51,6 +53,7 @@ public class DiscoveryService {
     private final MongoTemplate mongoTemplate;
     private final NotificationService notificationService;
 
+    @Autowired
     public DiscoveryService(
             UserRepository userRepository,
             ConnectionRepository connectionRepository,
@@ -66,6 +69,17 @@ public class DiscoveryService {
         this.matchSuggestionRepository = matchSuggestionRepository;
         this.mongoTemplate = mongoTemplate;
         this.notificationService = notificationService;
+    }
+
+    // Backwards-compatible constructor for tests or older callers that do not provide NotificationService
+    public DiscoveryService(
+            UserRepository userRepository,
+            ConnectionRepository connectionRepository,
+            BlockRepository blockRepository,
+            ReportRepository reportRepository,
+            MatchSuggestionRepository matchSuggestionRepository,
+            MongoTemplate mongoTemplate) {
+        this(userRepository, connectionRepository, blockRepository, reportRepository, matchSuggestionRepository, mongoTemplate, null);
     }
 
     public List<DiscoverUserResponse> nearby(String clerkId, Double longitude, Double latitude, Integer radiusKm, Integer limit) {
@@ -404,6 +418,9 @@ public class DiscoveryService {
                 : candidate.getProfile().getInterests());
         response.setVerified(Boolean.TRUE.equals(candidate.getIsVerified()));
         response.setDistanceKm(round(distanceKm(me, candidate)));
+
+        // expose clerkId so frontend can reference Clerk user id (for API calls)
+        response.setClerkId(candidate.getClerkId());
 
         if (scoredCandidate != null) {
             response.setScore(scoredCandidate.score());
