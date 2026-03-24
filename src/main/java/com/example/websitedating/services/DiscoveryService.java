@@ -35,12 +35,10 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
-<<<<<<< HEAD
 import org.springframework.beans.factory.annotation.Autowired;
-=======
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
->>>>>>> 435e72e1bcc80603f27fe456188ce73fbf9a1d29
+
 
 @Service
 public class DiscoveryService {

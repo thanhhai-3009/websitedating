@@ -35,37 +35,23 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(
-<<<<<<< HEAD
-                            "/api/auth/register",
-                            "/api/auth/login",
-                            "/api/users/onboarding",
-                            "/api/users/profile/**",
-                            "/api/users/resolve/**",
-                            "/api/uploads/photos",
-                            "/api/files/upload",
-                            "/api/discovery/**",
-                            "/api/chats/**",
-                            "/api/appointments/**",
-                            "/api/notifications/**",
-                            "/ws/**",
-                            "/uploads/**",
-                            "/error")
-=======
-                                "/ws/**",
-                                "/api/auth/register",
-                                "/api/auth/login",
-                                "/api/users/onboarding",
-                                "/api/users/profile/**",
-                                "/api/users/resolve/**",
-                                "/api/uploads/photos",
-                                "/api/files/upload",
-                                "/api/discovery/**",
-                                "/api/notifications/**",
-                                "/api/payments/momo/return",
-                                "/api/payments/momo/ipn",
-                                "/error")
->>>>>>> origin/develop
+                    .requestMatchers(
+                        "/ws/**",
+                        "/api/auth/register",
+                        "/api/auth/login",
+                        "/api/users/onboarding",
+                        "/api/users/profile/**",
+                        "/api/users/resolve/**",
+                        "/api/uploads/photos",
+                        "/api/files/upload",
+                        "/api/discovery/**",
+                        "/api/chats/**",
+                        "/api/appointments/**",
+                        "/api/notifications/**",
+                        "/api/payments/momo/return",
+                        "/api/payments/momo/ipn",
+                        "/uploads/**",
+                        "/error")
                         .permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest()
