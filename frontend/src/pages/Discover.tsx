@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { ReportUserDialog } from "@/components/ReportUserDialog";
+import { BlockUserDialog } from "@/components/BlockUserDialog";
 
 type DiscoverCandidate = {
   userId: string;
@@ -67,6 +69,9 @@ export default function Discover() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState("");
   const { toast } = useToast();
+
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [blockDialogOpen, setBlockDialogOpen] = useState(false);
 
   const isPremiumUser = Boolean(currentAccount?.premiumActive);
 
@@ -325,6 +330,8 @@ export default function Discover() {
                       user={currentCard}
                       onMatch={handleMatch}
                       onPass={handlePass}
+                      onReport={() => setReportDialogOpen(true)}
+                      onBlock={() => setBlockDialogOpen(true)}
                     />
                   </motion.div>
                 </AnimatePresence>
@@ -339,6 +346,31 @@ export default function Discover() {
           </div>
         </div>
       </div>
+
+      {currentCandidate && (
+        <>
+          <ReportUserDialog
+            open={reportDialogOpen}
+            onOpenChange={setReportDialogOpen}
+            userName={currentCandidate.displayName}
+            targetUserId={currentCandidate.userId}
+            onReported={() => {
+              // Usually reportingsevere cases auto-blocks (backend does this),
+              // but we can locally move to next card too.
+            }}
+          />
+          <BlockUserDialog
+            open={blockDialogOpen}
+            onOpenChange={setBlockDialogOpen}
+            userName={currentCandidate.displayName}
+            targetUserId={currentCandidate.userId}
+            onBlocked={() => {
+              handlePass();
+            }}
+          />
+        </>
+      )}
     </Layout>
   );
 }
+

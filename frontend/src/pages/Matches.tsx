@@ -6,6 +6,8 @@ import { useUser } from "@clerk/clerk-react";
 import { Layout } from "@/components/layout/Layout";
 import { MatchCard } from "@/components/cards/MatchCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ReportUserDialog } from "@/components/ReportUserDialog";
+import { BlockUserDialog } from "@/components/BlockUserDialog";
 
 type DiscoverCandidate = {
   userId: string;
@@ -37,6 +39,10 @@ export default function Matches() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState("");
   const [promotingUserId, setPromotingUserId] = useState<string | null>(null);
+
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [blockDialogOpen, setBlockDialogOpen] = useState(false);
+  const [moderationUser, setModerationUser] = useState<{ id: string, name: string } | null>(null);
 
   useEffect(() => {
     const clerkId = user?.id;
@@ -146,6 +152,20 @@ export default function Matches() {
     }
   };
 
+  const handleReport = (id: string, name: string) => {
+    setModerationUser({ id, name });
+    setReportDialogOpen(true);
+  };
+
+  const handleBlock = (id: string, name: string) => {
+    setModerationUser({ id, name });
+    setBlockDialogOpen(true);
+  };
+
+  const handleBlockedSuccess = (userId: string) => {
+    setMatches(prev => prev.filter(m => m.id !== userId));
+  };
+
   const likedYou = useMemo(() => matches.filter((m) => m.status === "liked" && !m.likedByMe), [matches]);
   const pendingSentInvites = useMemo(() => matches.filter((m) => m.status === "liked" && m.likedByMe), [matches]);
   const newMatches = useMemo(() => matches.filter((m) => m.status !== "liked" && m.isNew), [matches]);
@@ -208,6 +228,8 @@ export default function Matches() {
                           actionLabel={promotingUserId === match.id ? "Matching..." : "Accept"}
                           actionDisabled={promotingUserId === match.id}
                           onAction={() => handlePromoteToMatch(match.id)}
+                          onReport={() => handleReport(match.id, match.name)}
+                          onBlock={() => handleBlock(match.id, match.name)}
                         />
                       </motion.div>
                     ))}
@@ -234,6 +256,8 @@ export default function Matches() {
                           user={match}
                           isNew
                           onAction={handleMessageForUser}
+                          onReport={() => handleReport(match.id, match.name)}
+                          onBlock={() => handleBlock(match.id, match.name)}
                         />
                       </motion.div>
                     ))}
@@ -258,6 +282,8 @@ export default function Matches() {
                         <MatchCard
                           user={match}
                           onAction={handleMessageForUser}
+                          onReport={() => handleReport(match.id, match.name)}
+                          onBlock={() => handleBlock(match.id, match.name)}
                         />
                       </motion.div>
                     ))}
@@ -286,6 +312,8 @@ export default function Matches() {
                         actionLabel={promotingUserId === match.id ? "Matching..." : "Accept"}
                         actionDisabled={promotingUserId === match.id}
                         onAction={() => handlePromoteToMatch(match.id)}
+                        onReport={() => handleReport(match.id, match.name)}
+                        onBlock={() => handleBlock(match.id, match.name)}
                       />
                     </motion.div>
                   ))}
@@ -316,6 +344,8 @@ export default function Matches() {
                           user={match}
                           actionLabel="Pending"
                           actionDisabled
+                          onReport={() => handleReport(match.id, match.name)}
+                          onBlock={() => handleBlock(match.id, match.name)}
                         />
                       </motion.div>
                     ))}
@@ -326,6 +356,28 @@ export default function Matches() {
           </Tabs>
         </div>
       </div>
+
+      {moderationUser && (
+        <>
+          <ReportUserDialog
+            open={reportDialogOpen}
+            onOpenChange={setReportDialogOpen}
+            userName={moderationUser.name}
+            targetUserId={moderationUser.id}
+            onReported={() => {
+              // Same as block if needed
+            }}
+          />
+          <BlockUserDialog
+            open={blockDialogOpen}
+            onOpenChange={setBlockDialogOpen}
+            userName={moderationUser.name}
+            targetUserId={moderationUser.id}
+            onBlocked={() => handleBlockedSuccess(moderationUser.id)}
+          />
+        </>
+      )}
     </Layout>
   );
 }
+

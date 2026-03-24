@@ -22,8 +22,8 @@ public class CommonEnums {
     }
     public enum NotificationChannel { in_app, push, email }
 
-    public enum ReportCategory { spam, harassment, fake_profile, scam, inappropriate_content, other }
-    public enum ReportStatus { pending, reviewed, resolved }
+    public enum ReportCategory { spam, harassment, fake_profile, scam, inappropriate_content, underage_user, other }
+    public enum ReportStatus { pending, resolved, dismissed, reviewed }
 
     public enum ReasonTag { same_interest, nearby, similar_behavior, mutual_connection, profile_similarity }
 }

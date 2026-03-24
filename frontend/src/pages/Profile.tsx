@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Plus,
   Crown,
+  UserX,
 } from "lucide-react";
 import { useClerk, useUser } from "@clerk/clerk-react";
 import { useNavigate } from "react-router-dom";
@@ -53,6 +54,7 @@ const menuItems = [
   { icon: Crown, label: "Premium", href: "/premium" },
   { icon: Settings, label: "Account Settings", href: "#" },
   { icon: Bell, label: "Notifications", href: "/notifications" },
+  { icon: UserX, label: "Blocked Users", href: "/blocked" },
   { icon: Shield, label: "Privacy & Safety", href: "#" },
   { icon: HelpCircle, label: "Help & Support", href: "#" },
 ];
@@ -971,13 +973,9 @@ export default function Profile() {
                   type="button"
                   className="w-full p-4 flex items-center gap-3 hover:bg-secondary/50 transition-colors"
                   onClick={() => {
-                    if (item.href === "/notifications") {
+                    if (item.href.startsWith("/")) {
                       navigate(item.href);
-                    }
-                    if (item.href === "/premium") {
-                      navigate(item.href);
-                    }
-                    if (item.href === "#edit") {
+                    } else if (item.href === "#edit") {
                       setIsEditing(true);
                       setPhoneInput(profile.phone || "");
                       setIsPhoneFormOpen(true);

@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { HeartHandshake, X, MapPin, Verified } from "lucide-react";
+import { HeartHandshake, X, MapPin, Verified, AlertTriangle, ShieldOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,8 @@ interface ProfileCardProps {
   };
   onMatch?: () => void;
   onPass?: () => void;
+  onReport?: () => void;
+  onBlock?: () => void;
   className?: string;
 }
 
@@ -25,12 +27,14 @@ export const ProfileCard = ({
   user,
   onMatch,
   onPass,
+  onReport,
+  onBlock,
   className,
 }: ProfileCardProps) => {
   return (
     <motion.div
       className={cn(
-        "relative w-full max-w-sm bg-card rounded-3xl overflow-hidden shadow-card",
+        "relative w-full max-w-sm bg-card rounded-3xl overflow-hidden shadow-card group",
         className
       )}
       initial={{ scale: 0.95, opacity: 0 }}
@@ -48,6 +52,28 @@ export const ProfileCard = ({
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
         
+        {/* Top Actions (Report/Block) */}
+        <div className="absolute top-4 right-4 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="w-8 h-8 rounded-full bg-black/20 hover:bg-black/40 text-white backdrop-blur-md"
+            onClick={(e) => { e.stopPropagation(); onReport?.(); }}
+            title="Report User"
+          >
+            <AlertTriangle className="w-4 h-4" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="w-8 h-8 rounded-full bg-black/20 hover:bg-black/40 text-white backdrop-blur-md"
+            onClick={(e) => { e.stopPropagation(); onBlock?.(); }}
+            title="Block User"
+          >
+            <ShieldOff className="w-4 h-4" />
+          </Button>
+        </div>
+
         {/* Info Overlay */}
         <div className="absolute bottom-0 left-0 right-0 p-6 text-white">
           <div className="flex items-center gap-2 mb-1">
@@ -103,3 +129,4 @@ export const ProfileCard = ({
     </motion.div>
   );
 };
+
