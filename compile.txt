@@ -1,0 +1,81 @@
+﻿[INFO] Scanning for projects...
+[INFO] 
+[INFO] ---------------------< com.example:websitedating >----------------------
+[INFO] Building websitedating 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ websitedating ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 0 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ websitedating ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 59 source files with javac [debug parameters release 25] to target\classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[102,45] cannot find symbol
+  symbol:   method getReputationScore()
+  location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[107,17] cannot find symbol
+  symbol:   method setReputationScore(int)
+  location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[112,21] cannot find symbol
+  symbol:   method setFlaggedForReview(boolean)
+  location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[118,46] cannot find symbol
+  symbol:   method getFakePhotoReports()
+  location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[120,45] cannot find symbol
+  symbol:   method getFakePhotoReports()
+  location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[125,43] cannot find symbol
+  symbol:   method getNoShowCount()
+  location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[126,21] cannot find symbol
+  symbol:   method setNoShowCount(int)
+  location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[128,45] cannot find symbol
+  symbol:   method getNoShowCount()
+  location: variable user of type com.example.websitedating.models.User
+[INFO] 8 errors 
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  6.082 s
+[INFO] Finished at: 2026-03-24T15:55:15+07:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.14.1:compile (default-compile) on project websitedating: Compilation failure: Compilation failure: 
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[102,45] cannot find symbol
+[ERROR]   symbol:   method getReputationScore()
+[ERROR]   location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[107,17] cannot find symbol
+[ERROR]   symbol:   method setReputationScore(int)
+[ERROR]   location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[112,21] cannot find symbol
+[ERROR]   symbol:   method setFlaggedForReview(boolean)
+[ERROR]   location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[118,46] cannot find symbol
+[ERROR]   symbol:   method getFakePhotoReports()
+[ERROR]   location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[120,45] cannot find symbol
+[ERROR]   symbol:   method getFakePhotoReports()
+[ERROR]   location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[125,43] cannot find symbol
+[ERROR]   symbol:   method getNoShowCount()
+[ERROR]   location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[126,21] cannot find symbol
+[ERROR]   symbol:   method setNoShowCount(int)
+[ERROR]   location: variable user of type com.example.websitedating.models.User
+[ERROR] /D:/BtJS/websitedating/src/main/java/com/example/websitedating/services/DateReviewService.java:[128,45] cannot find symbol
+[ERROR]   symbol:   method getNoShowCount()
+[ERROR]   location: variable user of type com.example.websitedating.models.User
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException

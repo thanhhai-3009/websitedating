@@ -49,6 +49,11 @@ public class User {
     private Settings settings;
     private Status status;
 
+    private Integer reputationScore;
+    private Boolean flaggedForReview;
+    private Integer fakePhotoReports = 0;
+    private Integer noShowCount = 0;
+
     @CreatedDate
     private Instant createdAt;
 

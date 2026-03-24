@@ -9,6 +9,10 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ArrowLeft, Check, ShieldAlert, UserX } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import axios from "axios";
+import { useAuth } from "@clerk/clerk-react";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 
 // ─── Mock data (replace with API call using appointmentId) ───────────────────
 const MOCK_APPOINTMENTS: Record<string, { name: string; initials: string; spot: string; date: string }> = {
@@ -37,6 +41,8 @@ const DateReview = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { userId: clerkId } = useAuth();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { isReviewed, markReviewed } = useReviewedAppointments();
   const aptId = Number(id);
@@ -85,8 +91,9 @@ const DateReview = () => {
     else if (positiveCount > 0 && state.wantSimilar === true) verdict = "good";
 
     return {
-      appointmentId: id,
+      appointmentId: String(id),
       reviewedUserId: apt.name, // replace with actual userId from API
+      reviewerUserId: clerkId,
       didMeet: state.didMeet,
       whoAbsent: state.whoAbsent,           // backend deducts reputation from absent party
       photoMatch: state.photoMatch,          // backend flags profile if under50
@@ -96,17 +103,26 @@ const DateReview = () => {
     };
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (state.wantSimilar === null) {
       toast({ title: "Vui lòng trả lời câu hỏi cuối", variant: "destructive" });
       return;
     }
+    
+    setIsSubmitting(true);
     const payload = buildPayload();
-    // TODO: POST /api/reviews  (payload is double-blind — never returned to reviewed user)
-    console.log("[DateReview] payload →", payload);
-    markReviewed(aptId);
-    setSubmitted(true);
-    toast({ title: "Đã gửi đánh giá! 💕", description: "Cảm ơn bạn đã giúp cộng đồng an toàn hơn." });
+    
+    try {
+      await axios.post(`${API_BASE_URL}/api/reviews`, payload);
+      markReviewed(aptId);
+      setSubmitted(true);
+      toast({ title: "Đã gửi đánh giá! 💕", description: "Cảm ơn bạn đã giúp cộng đồng an toàn hơn." });
+    } catch (error) {
+      console.error("[DateReview] Submit review error", error);
+      toast({ title: "Lỗi hệ thống", description: "Không thể gửi đánh giá, vui lòng thử lại.", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // ─── Already reviewed guard ───────────────────────────────────────────────
@@ -353,10 +369,10 @@ const DateReview = () => {
                     <Button
                       variant="hero"
                       className="w-full mt-2"
-                      disabled={state.wantSimilar === null}
+                      disabled={state.wantSimilar === null || isSubmitting}
                       onClick={handleSubmit}
                     >
-                      Gửi đánh giá
+                      {isSubmitting ? "Đang gửi..." : "Gửi đánh giá"}
                     </Button>
                   </CardContent>
                 </Card>
