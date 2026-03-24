@@ -13,7 +13,7 @@ import { useLocation } from "react-router-dom";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { CalendarIcon, Clock, MapPin, Heart, ArrowLeft, Check } from "lucide-react";
-import { format } from "date-fns";
+import { format, startOfDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
@@ -227,7 +227,7 @@ const BookAppointment = () => {
                         mode="single"
                         selected={date}
                         onSelect={setDate}
-                        disabled={(d) => d < new Date()}
+                        disabled={(d) => d < startOfDay(new Date())}
                         initialFocus
                         className={cn("p-3 pointer-events-auto")}
                       />
