@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { useLocation } from "react-router-dom";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { CalendarIcon, Clock, MapPin, Heart, ArrowLeft, Check } from "lucide-react";
-import { format } from "date-fns";
+import { format, startOfDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
@@ -38,6 +38,7 @@ const BookAppointment = () => {
   const { toast } = useToast();
   const { user } = useUser();
   const [matchedUsers, setMatchedUsers] = useState<Array<any>>([]);
+  const [userAppointments, setUserAppointments] = useState<Array<any>>([]);
 
   useEffect(() => {
     const clerkId = user?.id;
@@ -53,6 +54,20 @@ const BookAppointment = () => {
         console.error(e);
       }
     })();
+
+    // fetch user's existing appointments to detect conflicting times
+    (async () => {
+      try {
+        const res = await fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) setUserAppointments(data || []);
+        }
+      } catch (e) {
+        console.error('Could not load user appointments', e);
+      }
+    })();
+
     return () => { cancelled = true; };
   }, [user]);
   const location = useLocation();
@@ -109,6 +124,41 @@ const BookAppointment = () => {
       toast({ title: "Error", description: "Could not schedule appointment.", variant: 'destructive' });
     });
   };
+
+  // derive available time slots based on selected date and existing appointments
+  const availableTimeSlots = useMemo(() => {
+    if (!date) return timeSlots.map((t) => ({ slot: t, allowed: true }));
+    const now = new Date();
+    return timeSlots.map((t) => {
+      const slotDate = new Date(date);
+      const [hourPart, meridiem] = t.split(" ");
+      const [hStr, mStr] = hourPart.split(":");
+      let h = parseInt(hStr, 10);
+      if (meridiem === "PM" && h !== 12) h += 12;
+      if (meridiem === "AM" && h === 12) h = 0;
+      slotDate.setHours(h, parseInt(mStr || "0", 10), 0, 0);
+
+      // slot is in the past relative to now
+      const inPast = slotDate <= now;
+
+      // conflict if any existing appointment has the same date/time
+      const conflict = (userAppointments || []).some((a) => {
+        if (!a.scheduledTime) return false;
+        const s = new Date(a.scheduledTime);
+        return s.getFullYear() === slotDate.getFullYear() && s.getMonth() === slotDate.getMonth() && s.getDate() === slotDate.getDate() && s.getHours() === slotDate.getHours() && s.getMinutes() === slotDate.getMinutes();
+      });
+
+      const allowed = !inPast && !conflict;
+      return { slot: t, allowed };
+    });
+  }, [date, userAppointments]);
+
+  // if currently selected time becomes unavailable when date changes, clear it
+  useEffect(() => {
+    if (!time || !date) return;
+    const found = availableTimeSlots.find(s => s.slot === time);
+    if (found && !found.allowed) setTime("");
+  }, [availableTimeSlots, time, date]);
 
   if (submitted) {
     return (
@@ -227,7 +277,7 @@ const BookAppointment = () => {
                         mode="single"
                         selected={date}
                         onSelect={setDate}
-                        disabled={(d) => d < new Date()}
+                        disabled={(d) => d < startOfDay(new Date())}
                         initialFocus
                         className={cn("p-3 pointer-events-auto")}
                       />
@@ -242,8 +292,10 @@ const BookAppointment = () => {
                       <SelectValue placeholder="Select time" />
                     </SelectTrigger>
                     <SelectContent>
-                      {timeSlots.map(t => (
-                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      {availableTimeSlots.map(({ slot, allowed }) => (
+                        <SelectItem key={slot} value={slot} disabled={!allowed}>
+                          {slot}{!allowed && " — Unavailable"}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
