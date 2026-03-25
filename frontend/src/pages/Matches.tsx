@@ -6,6 +6,8 @@ import { useUser } from "@clerk/clerk-react";
 import { Layout } from "@/components/layout/Layout";
 import { MatchCard } from "@/components/cards/MatchCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ReportUserDialog } from "@/components/ReportUserDialog";
+import { BlockUserDialog } from "@/components/BlockUserDialog";
 
 type DiscoverCandidate = {
   userId: string;
@@ -37,6 +39,10 @@ export default function Matches() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState("");
   const [promotingUserId, setPromotingUserId] = useState<string | null>(null);
+
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [blockDialogOpen, setBlockDialogOpen] = useState(false);
+  const [moderationUser, setModerationUser] = useState<{ id: string, name: string } | null>(null);
 
   useEffect(() => {
     const clerkId = user?.id;
@@ -146,6 +152,20 @@ export default function Matches() {
     }
   };
 
+  const handleReport = (id: string, name: string) => {
+    setModerationUser({ id, name });
+    setReportDialogOpen(true);
+  };
+
+  const handleBlock = (id: string, name: string) => {
+    setModerationUser({ id, name });
+    setBlockDialogOpen(true);
+  };
+
+  const handleBlockedSuccess = (userId: string) => {
+    setMatches(prev => prev.filter(m => m.id !== userId));
+  };
+
   const likedYou = useMemo(() => matches.filter((m) => m.status === "liked" && !m.likedByMe), [matches]);
   const pendingSentInvites = useMemo(() => matches.filter((m) => m.status === "liked" && m.likedByMe), [matches]);
   const newMatches = useMemo(() => matches.filter((m) => m.status !== "liked" && m.isNew), [matches]);
@@ -183,13 +203,12 @@ export default function Matches() {
             </TabsList>
 
             <TabsContent value="matches" className="space-y-8">
-              {loading && <p className="text-center text-muted-foreground">Loading matches...</p>}
-              {!loading && fetchError && <p className="text-center text-destructive">{fetchError}</p>}
-              {!loading && !fetchError && matches.length === 0 && (
+              {fetchError && <p className="text-center text-destructive">{fetchError}</p>}
+              {!fetchError && matches.length === 0 && (
                 <p className="text-center text-muted-foreground">No matches yet. Keep discovering people to get more matches.</p>
               )}
 
-              {!loading && !fetchError && likedYou.length > 0 && (
+              {!fetchError && likedYou.length > 0 && (
                 <section>
                   <h2 className="font-serif text-xl font-semibold text-foreground mb-4 flex items-center gap-2">
                     <Heart className="w-5 h-5 text-primary" />
@@ -208,6 +227,8 @@ export default function Matches() {
                           actionLabel={promotingUserId === match.id ? "Matching..." : "Accept"}
                           actionDisabled={promotingUserId === match.id}
                           onAction={() => handlePromoteToMatch(match.id)}
+                          onReport={() => handleReport(match.id, match.name)}
+                          onBlock={() => handleBlock(match.id, match.name)}
                         />
                       </motion.div>
                     ))}
@@ -216,7 +237,7 @@ export default function Matches() {
               )}
 
               {/* New Matches */}
-              {!loading && !fetchError && newMatches.length > 0 && (
+              {!fetchError && newMatches.length > 0 && (
                 <section>
                   <h2 className="font-serif text-xl font-semibold text-foreground mb-4 flex items-center gap-2">
                     <Sparkles className="w-5 h-5 text-gold" />
@@ -234,6 +255,8 @@ export default function Matches() {
                           user={match}
                           isNew
                           onAction={handleMessageForUser}
+                          onReport={() => handleReport(match.id, match.name)}
+                          onBlock={() => handleBlock(match.id, match.name)}
                         />
                       </motion.div>
                     ))}
@@ -242,7 +265,7 @@ export default function Matches() {
               )}
 
               {/* All Matches */}
-              {!loading && !fetchError && allMatches.length > 0 && (
+              {!fetchError && allMatches.length > 0 && (
                 <section>
                   <h2 className="font-serif text-xl font-semibold text-foreground mb-4">
                     All Matches
@@ -258,6 +281,8 @@ export default function Matches() {
                         <MatchCard
                           user={match}
                           onAction={handleMessageForUser}
+                          onReport={() => handleReport(match.id, match.name)}
+                          onBlock={() => handleBlock(match.id, match.name)}
                         />
                       </motion.div>
                     ))}
@@ -267,7 +292,6 @@ export default function Matches() {
             </TabsContent>
 
             <TabsContent value="likes">
-              {loading && <p className="text-center text-muted-foreground">Loading likes...</p>}
               {!loading && fetchError && <p className="text-center text-destructive">{fetchError}</p>}
               {!loading && !fetchError && likedYou.length === 0 && (
                 <p className="text-center text-muted-foreground">No one has liked you yet.</p>
@@ -286,6 +310,8 @@ export default function Matches() {
                         actionLabel={promotingUserId === match.id ? "Matching..." : "Accept"}
                         actionDisabled={promotingUserId === match.id}
                         onAction={() => handlePromoteToMatch(match.id)}
+                        onReport={() => handleReport(match.id, match.name)}
+                        onBlock={() => handleBlock(match.id, match.name)}
                       />
                     </motion.div>
                   ))}
@@ -294,7 +320,6 @@ export default function Matches() {
             </TabsContent>
 
             <TabsContent value="sent">
-              {loading && <p className="text-center text-muted-foreground">Loading sent invites...</p>}
               {!loading && fetchError && <p className="text-center text-destructive">{fetchError}</p>}
               {!loading && !fetchError && pendingSentInvites.length === 0 && (
                 <p className="text-center text-muted-foreground">You have no pending invites right now.</p>
@@ -316,6 +341,8 @@ export default function Matches() {
                           user={match}
                           actionLabel="Pending"
                           actionDisabled
+                          onReport={() => handleReport(match.id, match.name)}
+                          onBlock={() => handleBlock(match.id, match.name)}
                         />
                       </motion.div>
                     ))}
@@ -326,6 +353,28 @@ export default function Matches() {
           </Tabs>
         </div>
       </div>
+
+      {moderationUser && (
+        <>
+          <ReportUserDialog
+            open={reportDialogOpen}
+            onOpenChange={setReportDialogOpen}
+            userName={moderationUser.name}
+            targetUserId={moderationUser.id}
+            onReported={() => {
+              // Same as block if needed
+            }}
+          />
+          <BlockUserDialog
+            open={blockDialogOpen}
+            onOpenChange={setBlockDialogOpen}
+            userName={moderationUser.name}
+            targetUserId={moderationUser.id}
+            onBlocked={() => handleBlockedSuccess(moderationUser.id)}
+          />
+        </>
+      )}
     </Layout>
   );
 }
+

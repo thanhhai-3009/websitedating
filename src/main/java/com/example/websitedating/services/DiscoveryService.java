@@ -52,6 +52,7 @@ public class DiscoveryService {
     private final MatchSuggestionRepository matchSuggestionRepository;
     private final MongoTemplate mongoTemplate;
     private final NotificationService notificationService;
+    private final WebSocketPresenceService webSocketPresenceService;
 
     @Autowired
     public DiscoveryService(
@@ -61,7 +62,8 @@ public class DiscoveryService {
             ReportRepository reportRepository,
             MatchSuggestionRepository matchSuggestionRepository,
             MongoTemplate mongoTemplate,
-            NotificationService notificationService) {
+            NotificationService notificationService,
+            WebSocketPresenceService webSocketPresenceService) {
         this.userRepository = userRepository;
         this.connectionRepository = connectionRepository;
         this.blockRepository = blockRepository;
@@ -69,6 +71,19 @@ public class DiscoveryService {
         this.matchSuggestionRepository = matchSuggestionRepository;
         this.mongoTemplate = mongoTemplate;
         this.notificationService = notificationService;
+        this.webSocketPresenceService = webSocketPresenceService;
+    }
+
+    // Backwards-compatible constructor for tests or older callers that do not provide WebSocketPresenceService
+    public DiscoveryService(
+            UserRepository userRepository,
+            ConnectionRepository connectionRepository,
+            BlockRepository blockRepository,
+            ReportRepository reportRepository,
+            MatchSuggestionRepository matchSuggestionRepository,
+            MongoTemplate mongoTemplate,
+            NotificationService notificationService) {
+        this(userRepository, connectionRepository, blockRepository, reportRepository, matchSuggestionRepository, mongoTemplate, notificationService, null);
     }
 
     // Backwards-compatible constructor for tests or older callers that do not provide NotificationService
@@ -79,7 +94,7 @@ public class DiscoveryService {
             ReportRepository reportRepository,
             MatchSuggestionRepository matchSuggestionRepository,
             MongoTemplate mongoTemplate) {
-        this(userRepository, connectionRepository, blockRepository, reportRepository, matchSuggestionRepository, mongoTemplate, null);
+        this(userRepository, connectionRepository, blockRepository, reportRepository, matchSuggestionRepository, mongoTemplate, null, null);
     }
 
     public List<DiscoverUserResponse> nearby(String clerkId, Double longitude, Double latitude, Integer radiusKm, Integer limit) {
@@ -173,12 +188,16 @@ public class DiscoveryService {
                     if (candidate == null) {
                         return null;
                     }
-                    return MatchResponse.from(
+                    MatchResponse response = MatchResponse.from(
                             candidate,
                             entry.getValue(),
                             buildDirectRoomId(me.getId(), candidate.getId()),
                             counterpartStatus.get(entry.getKey()),
                             Boolean.TRUE.equals(counterpartLikedByMe.get(entry.getKey())));
+                    if (webSocketPresenceService != null) {
+                        response.setOnline(webSocketPresenceService.isUserConnected(candidate.getClerkId()));
+                    }
+                    return response;
                 })
                 .filter(value -> value != null)
                 .limit(effectiveLimit)

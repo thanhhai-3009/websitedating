@@ -14,6 +14,8 @@ public class AdminUserResponse {
     private String email;
     private String role;
     private Boolean isVerified;
+    private Boolean isBanned;
+    private String banReason;
     private Instant createdAt;
     private ProfileDto profile;
 
@@ -38,6 +40,8 @@ public class AdminUserResponse {
                 .email(user.getEmail())
                 .role(user.getRole())
                 .isVerified(user.getIsVerified())
+                .isBanned(user.getIsBanned())
+                .banReason(user.getBanReason())
                 .createdAt(user.getCreatedAt())
                 .profile(profileDto)
                 .build();

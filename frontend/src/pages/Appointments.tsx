@@ -11,7 +11,8 @@ import { CalendarDays, Clock, MapPin, MessageCircle, Star, Trash2, Edit, Plus } 
 import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import { useUser } from "@clerk/clerk-react";
+import { useUser, useAuth } from "@clerk/clerk-react";
+import { getApiToken } from "@/lib/clerkToken";
 
 interface Appointment {
   id: string;
@@ -21,8 +22,24 @@ interface Appointment {
   location: string;
   date: string;
   time: string;
-  status: "confirmed" | "pending" | "completed" | "cancelled";
+  status: "confirmed" | "pending" | "completed" | "cancelled" | "incomplete";
+  creatorId?: string | null;
+  participantId?: string | null;
+  scheduledISO?: string | null;
+  creatorContinued?: boolean;
+  participantContinued?: boolean;
   note?: string;
+}
+
+interface DateReviewSummary {
+  id: string;
+  appointmentId: string;
+  updatedAt?: string;
+}
+
+interface ResolvedUserResponse {
+  id: string;
+  clerkId: string;
 }
 
 // will be fetched from API
@@ -42,27 +59,106 @@ const Appointments = () => {
   const [editAptRaw, setEditAptRaw] = useState<any | null>(null);
   const [editParticipantName, setEditParticipantName] = useState<string | null>(null);
   const [editUiStatus, setEditUiStatus] = useState<string>("pending");
+  const [selfDbUserId, setSelfDbUserId] = useState<string | null>(null);
+  const [reviewsByAppointmentId, setReviewsByAppointmentId] = useState<Record<string, DateReviewSummary>>({});
   const { toast } = useToast();
   const { user } = useUser();
+  const { getToken } = useAuth();
+
+  useEffect(() => {
+    let cancelled = false;
+    const resolveDbUser = async () => {
+      if (!user?.id) {
+        setSelfDbUserId(null);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/users/resolve/${encodeURIComponent(user.id)}`);
+        if (!res.ok) throw new Error("Cannot resolve current user");
+        const data = (await res.json()) as ResolvedUserResponse;
+        if (!cancelled) {
+          setSelfDbUserId(data?.id || null);
+        }
+      } catch {
+        if (!cancelled) {
+          setSelfDbUserId(null);
+        }
+      }
+    };
+    resolveDbUser();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  const loadMyReviews = async (appointmentIds: string[]) => {
+    if (!appointmentIds.length) {
+      setReviewsByAppointmentId({});
+      return;
+    }
+
+    try {
+      const token = await getApiToken(getToken);
+      if (!token) {
+        setReviewsByAppointmentId({});
+        return;
+      }
+
+      const params = new URLSearchParams();
+      appointmentIds.forEach((id) => params.append("appointmentIds", id));
+
+      const response = await fetch(`/api/date-reviews/mine?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        throw new Error("Cannot load date reviews");
+      }
+
+      const reviewList = (await response.json()) as DateReviewSummary[];
+      const nextMap: Record<string, DateReviewSummary> = {};
+      (reviewList || []).forEach((value) => {
+        if (value?.appointmentId) {
+          nextMap[value.appointmentId] = value;
+        }
+      });
+      setReviewsByAppointmentId(nextMap);
+    } catch {
+      setReviewsByAppointmentId({});
+    }
+  };
 
   const fetchAppointments = async () => {
     const clerkId = user?.id;
+    const currentUserId = selfDbUserId;
     if (!clerkId) return;
     try {
-      const res = await fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`);
-      if (!res.ok) throw new Error('Failed to fetch');
-      const data = await res.json();
+      const [resDb, resClerk] = await Promise.all([
+        currentUserId ? fetch(`/api/appointments?userId=${encodeURIComponent(currentUserId)}`) : Promise.resolve(null),
+        fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`),
+      ]);
+
+      const dbData = resDb && resDb.ok ? await resDb.json() : [];
+      const clerkData = resClerk.ok ? await resClerk.json() : [];
+      const mergedById = new Map<string, any>();
+      [...(Array.isArray(dbData) ? dbData : []), ...(Array.isArray(clerkData) ? clerkData : [])].forEach((item) => {
+        const key = item?.id || item?._id;
+        if (key) {
+          mergedById.set(String(key), item);
+        }
+      });
+      const data = Array.from(mergedById.values());
       // also fetch matched users so we can resolve participantId -> display name
-          let mdata: any[] = [];
-          try {
-            const mres = await fetch(`/api/discovery/matches?clerkId=${encodeURIComponent(clerkId)}&limit=200`);
-            if (mres.ok) {
-              mdata = await mres.json();
-              setMatchedUsers(mdata || []);
-            }
-          } catch (e) {
-            console.error('Could not load matches', e);
-          }
+      let mdata: any[] = [];
+      try {
+        const mres = await fetch(`/api/discovery/matches?clerkId=${encodeURIComponent(clerkId)}&limit=200`);
+        if (mres.ok) {
+          mdata = await mres.json();
+          setMatchedUsers(mdata || []);
+        }
+      } catch (e) {
+        console.error('Could not load matches', e);
+      }
 
       // normalize server shape to UI shape
       const mapBackendToUI = (s: any) => {
@@ -86,13 +182,11 @@ const Appointments = () => {
         }
       };
 
-      // build a quick lookup from matchedUsers returned above
-          // build a quick lookup from matches we just fetched (use local mdata to avoid stale state)
-          const matchLookup = new Map<string,string>();
-          (mdata || []).forEach((m:any) => {
-            const id = m.clerkId ?? m.userId ?? m.id ?? null;
-            if (id) matchLookup.set(String(id), m.displayName || m.username || m.name || String(id));
-          });
+      const matchLookup = new Map<string, string>();
+      (mdata || []).forEach((m: any) => {
+        const id = m.userId ?? m.clerkId ?? m.id ?? null;
+        if (id) matchLookup.set(String(id), m.displayName || m.username || m.name || String(id));
+      });
 
       const mapped = (data || []).map((it: any) => {
         const scheduled = it.scheduledTime ? new Date(it.scheduledTime) : null;
@@ -108,19 +202,45 @@ const Appointments = () => {
           date: scheduled ? format(scheduled, "PPP") : "",
           time: scheduled ? format(scheduled, "p") : "",
           status: mapBackendToUI(it.status),
+          creatorId: it.creatorId || null,
+          participantId: it.participantId || null,
+          scheduledISO: it.scheduledTime || null,
+          creatorContinued: !!it.creatorContinued,
+          participantContinued: !!it.participantContinued,
           note: it.note || it.description || "",
         } as Appointment;
       });
+
       setAppointments(mapped);
+
+      const completedIds = mapped.filter((value) => value.status === "completed").map((value) => value.id);
+      await loadMyReviews(completedIds);
     } catch (err) {
       console.error(err);
     }
   };
 
-  useEffect(() => { fetchAppointments(); }, [user]);
+  useEffect(() => {
+    fetchAppointments();
+  }, [user, selfDbUserId]);
 
-  const upcoming = appointments.filter(a => a.status === "confirmed" || a.status === "pending");
-  const past = appointments.filter(a => a.status === "completed" || a.status === "cancelled");
+  const now = new Date();
+
+  const parseISO = (s?: string | null) => s ? new Date(s) : null;
+  const addHours = (d: Date, h: number) => new Date(d.getTime() + h * 60 * 60 * 1000);
+
+  // classify upcoming vs past with some derived rules:
+  // - proposed/pending where scheduledTime passed -> treat as past
+  // - otherwise confirmed/pending -> upcoming
+  const upcoming = appointments.filter(a => {
+    const sched = parseISO(a.scheduledISO);
+    if (!sched) return a.status === 'confirmed' || a.status === 'pending';
+    if (a.status === 'pending' && now > sched) return false; // move to past
+    return a.status === 'confirmed' || a.status === 'pending' || a.status === 'incomplete';
+  });
+  const past = appointments.filter(a => {
+    return a.status === 'completed' || a.status === 'cancelled' || (a.status === 'pending' && a.scheduledISO && now > new Date(a.scheduledISO));
+  });
 
   const handleCancel = () => {
     if (!cancelId) return;
@@ -165,50 +285,159 @@ const Appointments = () => {
               )}
               {showActions && (
                 <div className="flex gap-2 mt-3">
-                  <Button size="sm" variant="outline" className="gap-1" onClick={async () => {
-                    try {
-                      const res = await fetch(`/api/appointments/${encodeURIComponent(apt.id)}`);
-                      if (!res.ok) throw new Error('Failed to load appointment');
-                      const data = await res.json();
-                          setEditAptRaw(data);
-                          // resolve participant name from matchedUsers (if available)
-                          const pid = data?.participantId ? String(data.participantId) : null;
-                          if (pid) {
-                            const found = (matchedUsers || []).find((m:any) => String(m.clerkId ?? m.userId ?? m.id) === pid);
-                            setEditParticipantName(found ? (found.displayName || found.username || found.name) : pid);
-                          } else {
-                            setEditParticipantName(null);
-                          }
-                      // map backend status to UI status for selection
-                      const ui = (s: any) => {
-                        if (!s) return 'pending';
-                        const st = String(s).toLowerCase();
-                        if (st === 'scheduled') return 'confirmed';
-                        if (st === 'proposed') return 'pending';
-                        if (st === 'canceled' || st === 'cancelled') return 'cancelled';
-                        return st;
-                      };
-                      setEditUiStatus(ui(data.status));
-                    } catch (e) {
-                      console.error(e);
-                      toast({ title: 'Error', description: 'Could not load appointment for editing.', variant: 'destructive' });
+                  {/* role-based actions */}
+                  {(() => {
+                    const sched = parseISO(apt.scheduledISO);
+                    const isCreator = Boolean(apt.creatorId) && (
+                      String(apt.creatorId) === String(selfDbUserId || "") || String(apt.creatorId) === String(user?.id || "")
+                    );
+                    const isParticipant = Boolean(apt.participantId) && (
+                      String(apt.participantId) === String(selfDbUserId || "") || String(apt.participantId) === String(user?.id || "")
+                    );
+
+                    const acceptAppointment = async (id: string) => {
+                      try {
+                        const resGet = await fetch(`/api/appointments/${encodeURIComponent(id)}`);
+                        if (!resGet.ok) throw new Error('Failed to load appointment');
+                        const data = await resGet.json();
+                        data.status = 'scheduled';
+                        await fetch(`/api/appointments/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+                        toast({ title: 'Accepted', description: 'You accepted the appointment.' });
+                        fetchAppointments();
+                      } catch (e) {
+                        console.error(e);
+                        toast({ title: 'Error', description: 'Could not accept appointment.', variant: 'destructive' });
+                      }
+                    };
+
+                    const sendContinue = async (id: string) => {
+                      try {
+                        const resGet = await fetch(`/api/appointments/${encodeURIComponent(id)}`);
+                        if (!resGet.ok) throw new Error('Failed to load appointment');
+                        const data = await resGet.json();
+                        if (isCreator) data.creatorContinued = true;
+                        if (isParticipant) data.participantContinued = true;
+                        await fetch(`/api/appointments/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+                        toast({ title: 'Tiếp tục', description: 'Cảm ơn, chờ đối phương bấm tiếp tục.' });
+                        fetchAppointments();
+                      } catch (e) {
+                        console.error(e);
+                        toast({ title: 'Error', description: 'Could not send continue.', variant: 'destructive' });
+                      }
+                    };
+
+                    const completeAppointment = async (id: string) => {
+                      try {
+                        const resGet = await fetch(`/api/appointments/${encodeURIComponent(id)}`);
+                        if (!resGet.ok) throw new Error('Failed to load appointment');
+                        const data = await resGet.json();
+                        data.status = 'completed';
+                        await fetch(`/api/appointments/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+                        toast({ title: 'Hoàn thành', description: 'Cảm ơn bạn đã hoàn thành lịch hẹn.' });
+                        fetchAppointments();
+                      } catch (e) {
+                        console.error(e);
+                        toast({ title: 'Error', description: 'Could not complete appointment.', variant: 'destructive' });
+                      }
+                    };
+
+                    // Participant sees accept when proposed/pending
+                    if (apt.status === 'pending' && isParticipant) {
+                      return (
+                        <>
+                          <Button size="sm" variant="outline" className="gap-1" onClick={() => acceptAppointment(apt.id)}><Plus className="w-3.5 h-3.5" />Chấp nhận</Button>
+                          <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
+                            <Trash2 className="w-3.5 h-3.5" />Hủy
+                          </Button>
+                        </>
+                      );
                     }
-                  }}><Edit className="w-3.5 h-3.5" />Edit</Button>
 
-                  <Button size="sm" variant="outline" className="gap-1" onClick={() => {
-                    // navigate to messages, preselect conversation by id
-                    navigate('/messages', { state: { selectedConversationId: apt.matchName } });
-                  }}><MessageCircle className="w-3.5 h-3.5" />Chat</Button>
+                    // Creator sees only cancel while they are the requester
+                    if (apt.status === 'pending' && isCreator) {
+                      return (
+                        <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
+                          <Trash2 className="w-3.5 h-3.5" />Hủy
+                        </Button>
+                      );
+                    }
 
-                  <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
-                    <Trash2 className="w-3.5 h-3.5" />Cancel
-                  </Button>
+                    // At scheduled time both can 'Tiếp tục'
+                    if (apt.status === 'confirmed') {
+                      const start = sched;
+                      const end = start ? addHours(start, 2) : null;
+                      const userHasContinued = isCreator ? !!apt.creatorContinued : !!apt.participantContinued;
+
+                      if (start && now >= start && (!userHasContinued)) {
+                        return (
+                          <>
+                            <Button size="sm" variant="outline" className="gap-1" onClick={() => sendContinue(apt.id)}>Tiếp tục</Button>
+                            <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>Hủy</Button>
+                          </>
+                        );
+                      }
+
+                      // if both continued and now after end -> show complete
+                      if (start && end && now > end && apt.creatorContinued && apt.participantContinued) {
+                        return (
+                          <>
+                            <Button size="sm" variant="gradient" className="gap-1" onClick={() => completeAppointment(apt.id)}>Hoàn thành</Button>
+                          </>
+                        );
+                      }
+                    }
+
+                    // default actions: chat + edit + cancel
+                    return (
+                      <>
+                        <Button size="sm" variant="outline" className="gap-1" onClick={async () => {
+                          try {
+                            const res = await fetch(`/api/appointments/${encodeURIComponent(apt.id)}`);
+                            if (!res.ok) throw new Error('Failed to load appointment');
+                            const data = await res.json();
+                                setEditAptRaw(data);
+                                const pid = data?.participantId ? String(data.participantId) : null;
+                                if (pid) {
+                                  const found = (matchedUsers || []).find((m:any) => String(m.clerkId ?? m.userId ?? m.id) === pid);
+                                  setEditParticipantName(found ? (found.displayName || found.username || found.name) : pid);
+                                } else {
+                                  setEditParticipantName(null);
+                                }
+                            const ui = (s: any) => {
+                              if (!s) return 'pending';
+                              const st = String(s).toLowerCase();
+                              if (st === 'scheduled') return 'confirmed';
+                              if (st === 'proposed') return 'pending';
+                              if (st === 'canceled' || st === 'cancelled') return 'cancelled';
+                              return st;
+                            };
+                            setEditUiStatus(ui(data.status));
+                          } catch (e) {
+                            console.error(e);
+                            toast({ title: 'Error', description: 'Could not load appointment for editing.', variant: 'destructive' });
+                          }
+                        }}><Edit className="w-3.5 h-3.5" />Edit</Button>
+
+                        <Button size="sm" variant="outline" className="gap-1" onClick={() => {
+                          const counterpartId = isCreator ? apt.participantId : apt.creatorId;
+                          navigate('/messages', { state: { selectedConversationId: counterpartId || apt.matchName } });
+                        }}><MessageCircle className="w-3.5 h-3.5" />Chat</Button>
+
+                        <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
+                          <Trash2 className="w-3.5 h-3.5" />Cancel
+                        </Button>
+                      </>
+                    );
+                  })()}
                 </div>
               )}
               {apt.status === "completed" && (
                 <div className="mt-3">
                   <Button size="sm" variant="soft" className="gap-1" asChild>
-                    <Link to={`/review/${apt.id}`}><Star className="w-3.5 h-3.5" />Leave Review</Link>
+                    <Link to={`/review/${apt.id}`}>
+                      <Star className="w-3.5 h-3.5" />
+                      {reviewsByAppointmentId[apt.id] ? "View/Edit Review" : "Write Review"}
+                    </Link>
                   </Button>
                 </div>
               )}
@@ -251,6 +480,9 @@ const Appointments = () => {
                 </div>
               )}
             </TabsContent>
+
+
+
 
             <TabsContent value="past" className="space-y-4">
               {past.map(apt => (

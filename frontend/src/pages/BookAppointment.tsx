@@ -28,6 +28,11 @@ const timeSlots = [
   "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM", "8:00 PM", "9:00 PM",
 ];
 
+interface ResolvedUserResponse {
+  id: string;
+  clerkId: string;
+}
+
 const BookAppointment = () => {
   const [date, setDate] = useState<Date>();
   const [time, setTime] = useState("");
@@ -39,10 +44,39 @@ const BookAppointment = () => {
   const { user } = useUser();
   const [matchedUsers, setMatchedUsers] = useState<Array<any>>([]);
   const [userAppointments, setUserAppointments] = useState<Array<any>>([]);
+  const [selfDbUserId, setSelfDbUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const resolveDbUser = async () => {
+      if (!user?.id) {
+        setSelfDbUserId(null);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/users/resolve/${encodeURIComponent(user.id)}`);
+        if (!res.ok) throw new Error("Failed to resolve db user");
+        const data = (await res.json()) as ResolvedUserResponse;
+        if (!cancelled) {
+          setSelfDbUserId(data?.id || null);
+        }
+      } catch {
+        if (!cancelled) {
+          setSelfDbUserId(null);
+        }
+      }
+    };
+
+    resolveDbUser();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     const clerkId = user?.id;
-    if (!clerkId) return;
+    const currentUserId = selfDbUserId;
+    if (!clerkId || !currentUserId) return;
     let cancelled = false;
     (async () => {
       try {
@@ -55,21 +89,23 @@ const BookAppointment = () => {
       }
     })();
 
-    // fetch user's existing appointments to detect conflicting times
     (async () => {
       try {
-        const res = await fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (!cancelled) setUserAppointments(data || []);
-        }
+        const [resDb, resClerk] = await Promise.all([
+          fetch(`/api/appointments?userId=${encodeURIComponent(currentUserId)}`),
+          fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`),
+        ]);
+        const dbData = resDb.ok ? await resDb.json() : [];
+        const clerkData = resClerk.ok ? await resClerk.json() : [];
+        const merged = [...(dbData || []), ...(clerkData || [])];
+        if (!cancelled) setUserAppointments(merged);
       } catch (e) {
         console.error('Could not load user appointments', e);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [user]);
+  }, [selfDbUserId, user]);
   const location = useLocation();
 
   // preload spot from query param
@@ -82,7 +118,7 @@ const BookAppointment = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user?.id) {
+    if (!user?.id || !selfDbUserId) {
       toast({ title: "Not signed in", description: "Please sign in before booking.", variant: 'destructive' });
       return;
     }
@@ -103,7 +139,7 @@ const BookAppointment = () => {
     const estimate = selectedSpotObj ? costToEstimate(selectedSpotObj.cost) : { min: 0, max: 0 };
 
     const payload = {
-      creatorId: user.id,
+      creatorId: selfDbUserId,
       participantId: matchUser,
       title: "Date Appointment",
       location: { placeName: selectedSpotObj?.name || "", address: selectedSpotObj?.location || "" },
@@ -212,10 +248,10 @@ const BookAppointment = () => {
                     <button
                       type="button"
                       key={m.userId || m.id}
-                      onClick={() => setMatchUser(String(m.clerkId ?? m.userId ?? m.id))}
+                      onClick={() => setMatchUser(String(m.userId ?? m.id ?? m.clerkId))}
                       className={cn(
                         "flex items-center gap-3 p-3 rounded-xl border-2 transition-all",
-                        matchUser === String(m.clerkId ?? m.userId ?? m.id)
+                        matchUser === String(m.userId ?? m.id ?? m.clerkId)
                           ? "border-primary bg-coral-light/30"
                           : "border-border hover:border-primary/50"
                       )}

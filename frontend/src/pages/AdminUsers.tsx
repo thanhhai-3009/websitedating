@@ -25,6 +25,8 @@ interface User {
   email: string;
   role: string;
   isVerified: boolean;
+  isBanned?: boolean;
+  banReason?: string;
   createdAt: string;
   profile?: {
     avatarUrl?: string;
@@ -108,6 +110,43 @@ const AdminUsers = () => {
     }
   };
 
+  const handleBanUser = async (userId: string, username: string) => {
+    const reason = window.prompt(`Enter ban reason for "${username}":`, "Violation of community guidelines");
+    if (reason === null) return;
+    try {
+      const token = await getApiToken(getToken);
+      const response = await fetch(`http://localhost:8080/api/admin/users/${userId}/ban`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ reason })
+      });
+      if (!response.ok) throw new Error("Failed to ban user");
+      toast({ title: "✅ User banned", description: `"${username}" has been banned.` });
+      fetchUsers();
+    } catch {
+      toast({ title: "Error banning user", variant: "destructive" });
+    }
+  };
+
+  const handleUnbanUser = async (userId: string, username: string) => {
+    if (!window.confirm(`Unban "${username}"?`)) return;
+    try {
+      const token = await getApiToken(getToken);
+      const response = await fetch(`http://localhost:8080/api/admin/users/${userId}/ban`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error("Failed to unban user");
+      toast({ title: "✅ User unbanned", description: `"${username}" is no longer banned.` });
+      fetchUsers();
+    } catch {
+      toast({ title: "Error unbanning user", variant: "destructive" });
+    }
+  };
+
   if (isLoadingMe) return null;
   if (!isAdmin) return null;
 
@@ -127,14 +166,24 @@ const AdminUsers = () => {
           className="bg-white/70 backdrop-blur-xl rounded-3xl p-6 md:p-8 shadow-xl border border-white/50"
         >
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-            <div>
-              <h1 className="text-3xl font-bold flex items-center gap-3">
-                <ShieldAlert className="w-8 h-8 text-primary" />
-                Admin Dashboard
-              </h1>
-              <p className="text-muted-foreground mt-1">
-                {users.length} registered users
-              </p>
+            <div className="flex items-center gap-6">
+              <div>
+                <h1 className="text-3xl font-bold flex items-center gap-3">
+                  <ShieldAlert className="w-8 h-8 text-primary" />
+                  Admin Dashboard
+                </h1>
+                <p className="text-muted-foreground mt-1">
+                  {users.length} registered users
+                </p>
+              </div>
+              <Button 
+                variant="outline" 
+                className="rounded-full gap-2 border-primary/20 text-primary hover:bg-primary/5"
+                onClick={() => navigate("/admin/reports")}
+              >
+                <AlertCircle className="w-4 h-4" />
+                User Reports
+              </Button>
             </div>
             <div className="relative max-w-sm w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -153,22 +202,23 @@ const AdminUsers = () => {
                 <tr className="border-b border-gray-100 text-muted-foreground text-xs uppercase tracking-wider">
                   <th className="pb-3 pt-2 px-3 font-medium w-[220px]">User</th>
                   <th className="pb-3 pt-2 px-3 font-medium w-[220px]">Email</th>
+                  <th className="pb-3 pt-2 px-3 font-medium w-[130px]">Status</th>
                   <th className="pb-3 pt-2 px-3 font-medium w-[160px]">Role</th>
                   <th className="pb-3 pt-2 px-3 font-medium w-[100px]">Joined</th>
-                  <th className="pb-3 pt-2 px-3 font-medium w-[60px] text-right">Del</th>
+                  <th className="pb-3 pt-2 px-3 font-medium w-[100px] text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={5} className="py-12 text-center text-muted-foreground">
+                    <td colSpan={6} className="py-12 text-center text-muted-foreground">
                       <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
                       Loading users...
                     </td>
                   </tr>
                 ) : filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-12 text-center text-muted-foreground">
+                    <td colSpan={6} className="py-12 text-center text-muted-foreground">
                       <AlertCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                       <p>No users found.</p>
                     </td>
@@ -203,10 +253,25 @@ const AdminUsers = () => {
                         </div>
                       </td>
 
+                      {/* Status */}
+                      <td className="py-3 px-3">
+                        {user.isBanned ? (
+                          <Badge variant="destructive" className="gap-1 px-2 py-0 h-6">
+                            <ShieldX className="w-3 h-3" />
+                            BANNED
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="bg-success/10 text-success border-0 gap-1 px-2 py-0 h-6">
+                            <ShieldCheck className="w-3 h-3" />
+                            ACTIVE
+                          </Badge>
+                        )}
+                      </td>
+
                       {/* Role */}
                       <td className="py-3 px-3">
                         {user.id === currentUser?.id ? (
-                          <Badge className="gradient-primary border-0 gap-1">
+                          <Badge className="gradient-primary border-0 gap-1 h-6">
                             <ShieldCheck className="w-3 h-3" />
                             ADMIN (You)
                           </Badge>
@@ -241,19 +306,44 @@ const AdminUsers = () => {
                         {new Date(user.createdAt).toLocaleDateString("vi-VN")}
                       </td>
 
-                      {/* Delete */}
+                      {/* Actions */}
                       <td className="py-3 px-3 text-right">
-                        {user.id !== currentUser?.id && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title={`Delete ${user.username}`}
-                            onClick={() => handleDeleteUser(user.id, user.username)}
-                            className="text-red-400 hover:text-red-600 hover:bg-red-50 h-8 w-8 transition-all"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        )}
+                        <div className="flex items-center justify-end gap-1">
+                          {user.id !== currentUser?.id && (
+                            <>
+                              {user.isBanned ? (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title={`Unban ${user.username}`}
+                                  onClick={() => handleUnbanUser(user.id, user.username)}
+                                  className="text-success hover:text-success hover:bg-success/10 h-8 w-8 transition-all"
+                                >
+                                  <ShieldCheck className="w-4 h-4" />
+                                </Button>
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title={`Ban ${user.username}`}
+                                  onClick={() => handleBanUser(user.id, user.username)}
+                                  className="text-orange-500 hover:text-orange-600 hover:bg-orange-50 h-8 w-8 transition-all"
+                                >
+                                  <ShieldX className="w-4 h-4" />
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title={`Delete ${user.username}`}
+                                onClick={() => handleDeleteUser(user.id, user.username)}
+                                className="text-red-400 hover:text-red-600 hover:bg-red-50 h-8 w-8 transition-all"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </motion.tr>
                   ))

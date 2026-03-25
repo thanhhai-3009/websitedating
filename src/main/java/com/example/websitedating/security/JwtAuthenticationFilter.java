@@ -37,6 +37,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String authHeader = request.getHeader("Authorization");
+
+        // ─── CLERK-ID PARAM FALLBACK ──────────────────────────────────────────
+        // Many endpoints are permitAll() but use clerkId in params.
+        String clerkIdParam = request.getParameter("clerkId");
+        if (clerkIdParam != null && !clerkIdParam.isBlank()) {
+            Optional<User> u = userRepository.findByClerkId(clerkIdParam);
+            if (u.isPresent() && isBanned(u.get(), response)) return;
+        }
+
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;
@@ -44,17 +53,40 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String token = authHeader.substring(7);
         try {
-            if (SecurityContextHolder.getContext().getAuthentication() != null) {
+            // Re-check authentication context — if something else (like another filter)
+            // already set it, we still want to verify the user isn't banned.
+            Object existingAuth = SecurityContextHolder.getContext().getAuthentication();
+            if (existingAuth != null && existingAuth instanceof UsernamePasswordAuthenticationToken auth) {
+                String principal = auth.getName();
+                userRepository.findByClerkId(principal)
+                        .or(() -> userRepository.findByEmailIgnoreCase(principal))
+                        .ifPresent(u -> {
+                            try {
+                                if (isBanned(u, response)) return;
+                            } catch (IOException ignored) {}
+                        });
+                // If we didn't return (not banned), let the chain continue
+                if (response.isCommitted()) return;
+            }
+
+            // Normal Authentication logic
+            Optional<User> appUser = tryGetAppUser(token);
+            if (appUser.isPresent()) {
+                if (isBanned(appUser.get(), response)) return;
+                setAuthentication(appUser.get().getEmail(), appUser.get().getRole(), request);
                 filterChain.doFilter(request, response);
                 return;
             }
 
-            if (tryAuthenticateWithAppJwt(token, request)) {
-                filterChain.doFilter(request, response);
-                return;
+            Optional<User> clerkUser = tryGetClerkUser(token);
+            if (clerkUser.isPresent()) {
+                if (isBanned(clerkUser.get(), response)) return;
+                
+                String principalName = clerkUser.get().getClerkId() != null && !clerkUser.get().getClerkId().isBlank()
+                        ? clerkUser.get().getClerkId()
+                        : clerkUser.get().getEmail();
+                setAuthentication(principalName, clerkUser.get().getRole(), request);
             }
-
-            tryAuthenticateWithClerkJwt(token, request);
         } catch (Exception ignored) {
             SecurityContextHolder.clearContext();
         }
@@ -62,28 +94,38 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    private boolean tryAuthenticateWithAppJwt(String token, HttpServletRequest request) {
-        try {
-            String email = jwtService.extractSubject(token);
-            if (email == null || email.isBlank()) {
-                return false;
-            }
-
-            Optional<User> userOpt = userRepository.findByEmailIgnoreCase(email);
-            if (userOpt.isPresent() && jwtService.isTokenValid(token, userOpt.get().getEmail())) {
-                setAuthentication(userOpt.get().getEmail(), userOpt.get().getRole(), request);
-                return true;
-            }
-        } catch (Exception ignored) {
-            return false;
+    private boolean isBanned(User user, HttpServletResponse response) throws IOException {
+        if (Boolean.TRUE.equals(user.getIsBanned())) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType("application/json");
+            String reason = user.getBanReason() != null ? user.getBanReason() : "Violation of community guidelines";
+            response.getWriter().write("{\"message\": \"Account banned: " + reason + "\", \"banned\": true}");
+            return true;
         }
         return false;
     }
 
-    private void tryAuthenticateWithClerkJwt(String token, HttpServletRequest request) {
+    private Optional<User> tryGetAppUser(String token) {
+        try {
+            String email = jwtService.extractSubject(token);
+            if (email == null || email.isBlank()) {
+                return Optional.empty();
+            }
+
+            Optional<User> userOpt = userRepository.findByEmailIgnoreCase(email);
+            if (userOpt.isPresent() && jwtService.isTokenValid(token, userOpt.get().getEmail())) {
+                return userOpt;
+            }
+        } catch (Exception ignored) {
+            return Optional.empty();
+        }
+        return Optional.empty();
+    }
+
+    private Optional<User> tryGetClerkUser(String token) {
         Optional<ClerkJwtVerifier.ClerkPrincipal> principalOpt = clerkJwtVerifier.verify(token);
         if (principalOpt.isEmpty()) {
-            return;
+            return Optional.empty();
         }
 
         ClerkJwtVerifier.ClerkPrincipal principal = principalOpt.get();
@@ -92,14 +134,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (userOpt.isEmpty() && principal.email() != null) {
             userOpt = userRepository.findByEmailIgnoreCase(principal.email().toLowerCase(Locale.ROOT));
         }
-        if (userOpt.isEmpty()) {
-            return;
-        }
-
-        String principalName = userOpt.get().getClerkId() != null && !userOpt.get().getClerkId().isBlank()
-                ? userOpt.get().getClerkId()
-                : userOpt.get().getEmail();
-        setAuthentication(principalName, userOpt.get().getRole(), request);
+        return userOpt;
     }
 
     private void setAuthentication(String principalName, String role, HttpServletRequest request) {

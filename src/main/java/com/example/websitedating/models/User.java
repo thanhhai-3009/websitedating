@@ -50,6 +50,13 @@ public class User {
 
     private Instant premiumExpiresAt;
 
+    @Builder.Default
+    private Boolean isBanned = false;
+
+    private String banReason;
+
+    private Instant bannedAt;
+
     private Profile profile;
     private Preferences preferences;
     private BehaviorSignals behaviorSignals;
