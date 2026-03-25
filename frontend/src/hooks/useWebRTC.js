@@ -62,7 +62,11 @@ export function useWebRTC(roomId, senderId) {
           return;
         }
         const payload = await response.json();
-        const servers = Array.isArray(payload?.iceServers) ? payload.iceServers : [];
+        const servers = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.iceServers)
+          ? payload.iceServers
+          : [];
         if (!isMounted || servers.length === 0) {
           return;
         }

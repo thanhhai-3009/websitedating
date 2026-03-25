@@ -11,7 +11,8 @@ import { CalendarDays, Clock, MapPin, MessageCircle, Star, Trash2, Edit, Plus } 
 import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import { useUser } from "@clerk/clerk-react";
+import { useUser, useAuth } from "@clerk/clerk-react";
+import { getApiToken } from "@/lib/clerkToken";
 
 interface Appointment {
   id: string;
@@ -28,6 +29,17 @@ interface Appointment {
   creatorContinued?: boolean;
   participantContinued?: boolean;
   note?: string;
+}
+
+interface DateReviewSummary {
+  id: string;
+  appointmentId: string;
+  updatedAt?: string;
+}
+
+interface ResolvedUserResponse {
+  id: string;
+  clerkId: string;
 }
 
 // will be fetched from API
@@ -47,27 +59,106 @@ const Appointments = () => {
   const [editAptRaw, setEditAptRaw] = useState<any | null>(null);
   const [editParticipantName, setEditParticipantName] = useState<string | null>(null);
   const [editUiStatus, setEditUiStatus] = useState<string>("pending");
+  const [selfDbUserId, setSelfDbUserId] = useState<string | null>(null);
+  const [reviewsByAppointmentId, setReviewsByAppointmentId] = useState<Record<string, DateReviewSummary>>({});
   const { toast } = useToast();
   const { user } = useUser();
+  const { getToken } = useAuth();
+
+  useEffect(() => {
+    let cancelled = false;
+    const resolveDbUser = async () => {
+      if (!user?.id) {
+        setSelfDbUserId(null);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/users/resolve/${encodeURIComponent(user.id)}`);
+        if (!res.ok) throw new Error("Cannot resolve current user");
+        const data = (await res.json()) as ResolvedUserResponse;
+        if (!cancelled) {
+          setSelfDbUserId(data?.id || null);
+        }
+      } catch {
+        if (!cancelled) {
+          setSelfDbUserId(null);
+        }
+      }
+    };
+    resolveDbUser();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  const loadMyReviews = async (appointmentIds: string[]) => {
+    if (!appointmentIds.length) {
+      setReviewsByAppointmentId({});
+      return;
+    }
+
+    try {
+      const token = await getApiToken(getToken);
+      if (!token) {
+        setReviewsByAppointmentId({});
+        return;
+      }
+
+      const params = new URLSearchParams();
+      appointmentIds.forEach((id) => params.append("appointmentIds", id));
+
+      const response = await fetch(`/api/date-reviews/mine?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        throw new Error("Cannot load date reviews");
+      }
+
+      const reviewList = (await response.json()) as DateReviewSummary[];
+      const nextMap: Record<string, DateReviewSummary> = {};
+      (reviewList || []).forEach((value) => {
+        if (value?.appointmentId) {
+          nextMap[value.appointmentId] = value;
+        }
+      });
+      setReviewsByAppointmentId(nextMap);
+    } catch {
+      setReviewsByAppointmentId({});
+    }
+  };
 
   const fetchAppointments = async () => {
     const clerkId = user?.id;
+    const currentUserId = selfDbUserId;
     if (!clerkId) return;
     try {
-      const res = await fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`);
-      if (!res.ok) throw new Error('Failed to fetch');
-      const data = await res.json();
+      const [resDb, resClerk] = await Promise.all([
+        currentUserId ? fetch(`/api/appointments?userId=${encodeURIComponent(currentUserId)}`) : Promise.resolve(null),
+        fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`),
+      ]);
+
+      const dbData = resDb && resDb.ok ? await resDb.json() : [];
+      const clerkData = resClerk.ok ? await resClerk.json() : [];
+      const mergedById = new Map<string, any>();
+      [...(Array.isArray(dbData) ? dbData : []), ...(Array.isArray(clerkData) ? clerkData : [])].forEach((item) => {
+        const key = item?.id || item?._id;
+        if (key) {
+          mergedById.set(String(key), item);
+        }
+      });
+      const data = Array.from(mergedById.values());
       // also fetch matched users so we can resolve participantId -> display name
-          let mdata: any[] = [];
-          try {
-            const mres = await fetch(`/api/discovery/matches?clerkId=${encodeURIComponent(clerkId)}&limit=200`);
-            if (mres.ok) {
-              mdata = await mres.json();
-              setMatchedUsers(mdata || []);
-            }
-          } catch (e) {
-            console.error('Could not load matches', e);
-          }
+      let mdata: any[] = [];
+      try {
+        const mres = await fetch(`/api/discovery/matches?clerkId=${encodeURIComponent(clerkId)}&limit=200`);
+        if (mres.ok) {
+          mdata = await mres.json();
+          setMatchedUsers(mdata || []);
+        }
+      } catch (e) {
+        console.error('Could not load matches', e);
+      }
 
       // normalize server shape to UI shape
       const mapBackendToUI = (s: any) => {
@@ -91,13 +182,11 @@ const Appointments = () => {
         }
       };
 
-      // build a quick lookup from matchedUsers returned above
-          // build a quick lookup from matches we just fetched (use local mdata to avoid stale state)
-          const matchLookup = new Map<string,string>();
-          (mdata || []).forEach((m:any) => {
-            const id = m.clerkId ?? m.userId ?? m.id ?? null;
-            if (id) matchLookup.set(String(id), m.displayName || m.username || m.name || String(id));
-          });
+      const matchLookup = new Map<string, string>();
+      (mdata || []).forEach((m: any) => {
+        const id = m.userId ?? m.clerkId ?? m.id ?? null;
+        if (id) matchLookup.set(String(id), m.displayName || m.username || m.name || String(id));
+      });
 
       const mapped = (data || []).map((it: any) => {
         const scheduled = it.scheduledTime ? new Date(it.scheduledTime) : null;
@@ -121,13 +210,19 @@ const Appointments = () => {
           note: it.note || it.description || "",
         } as Appointment;
       });
+
       setAppointments(mapped);
+
+      const completedIds = mapped.filter((value) => value.status === "completed").map((value) => value.id);
+      await loadMyReviews(completedIds);
     } catch (err) {
       console.error(err);
     }
   };
 
-  useEffect(() => { fetchAppointments(); }, [user]);
+  useEffect(() => {
+    fetchAppointments();
+  }, [user, selfDbUserId]);
 
   const now = new Date();
 
@@ -193,8 +288,12 @@ const Appointments = () => {
                   {/* role-based actions */}
                   {(() => {
                     const sched = parseISO(apt.scheduledISO);
-                    const isCreator = user?.id && apt.creatorId && String(user.id) === String(apt.creatorId);
-                    const isParticipant = user?.id && apt.participantId && String(user.id) === String(apt.participantId);
+                    const isCreator = Boolean(apt.creatorId) && (
+                      String(apt.creatorId) === String(selfDbUserId || "") || String(apt.creatorId) === String(user?.id || "")
+                    );
+                    const isParticipant = Boolean(apt.participantId) && (
+                      String(apt.participantId) === String(selfDbUserId || "") || String(apt.participantId) === String(user?.id || "")
+                    );
 
                     const acceptAppointment = async (id: string) => {
                       try {
@@ -264,11 +363,10 @@ const Appointments = () => {
                     }
 
                     // At scheduled time both can 'Tiếp tục'
-                    if (apt.status === 'confirmed' || apt.status === 'confirmed') {
+                    if (apt.status === 'confirmed') {
                       const start = sched;
                       const end = start ? addHours(start, 2) : null;
                       const userHasContinued = isCreator ? !!apt.creatorContinued : !!apt.participantContinued;
-                      const otherContinued = isCreator ? !!apt.participantContinued : !!apt.creatorContinued;
 
                       if (start && now >= start && (!userHasContinued)) {
                         return (
@@ -321,7 +419,8 @@ const Appointments = () => {
                         }}><Edit className="w-3.5 h-3.5" />Edit</Button>
 
                         <Button size="sm" variant="outline" className="gap-1" onClick={() => {
-                          navigate('/messages', { state: { selectedConversationId: apt.matchName } });
+                          const counterpartId = isCreator ? apt.participantId : apt.creatorId;
+                          navigate('/messages', { state: { selectedConversationId: counterpartId || apt.matchName } });
                         }}><MessageCircle className="w-3.5 h-3.5" />Chat</Button>
 
                         <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
@@ -335,7 +434,10 @@ const Appointments = () => {
               {apt.status === "completed" && (
                 <div className="mt-3">
                   <Button size="sm" variant="soft" className="gap-1" asChild>
-                    <Link to={`/review/${apt.id}`}><Star className="w-3.5 h-3.5" />Leave Review</Link>
+                    <Link to={`/review/${apt.id}`}>
+                      <Star className="w-3.5 h-3.5" />
+                      {reviewsByAppointmentId[apt.id] ? "View/Edit Review" : "Write Review"}
+                    </Link>
                   </Button>
                 </div>
               )}
@@ -378,6 +480,9 @@ const Appointments = () => {
                 </div>
               )}
             </TabsContent>
+
+
+
 
             <TabsContent value="past" className="space-y-4">
               {past.map(apt => (

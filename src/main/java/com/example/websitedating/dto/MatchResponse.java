@@ -56,6 +56,10 @@ public class MatchResponse {
         return online;
     }
 
+    public void setOnline(boolean online) {
+        this.online = online;
+    }
+
     public Instant getMatchedAt() {
         return matchedAt;
     }

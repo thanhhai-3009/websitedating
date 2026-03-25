@@ -23,7 +23,7 @@ function messageKey(value) {
   return `${value?.id || ""}|${value?.senderId || ""}|${value?.timestamp || ""}|${value?.type || ""}|${value?.content || ""}`;
 }
 
-export function useChat(roomId, senderId) {
+export function useChat(roomId) {
   const { getToken } = useAuth();
   const [messages, setMessages] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -143,7 +143,6 @@ export function useChat(roomId, senderId) {
 
         const payload = {
           roomId,
-          senderId: senderId || undefined,
           content,
           type: "CHAT",
         };
@@ -153,7 +152,7 @@ export function useChat(roomId, senderId) {
           body: JSON.stringify(payload),
         });
       },
-      [roomId, senderId]
+      [roomId]
   );
 
   const sendImageMessage = useCallback(
@@ -195,7 +194,6 @@ export function useChat(roomId, senderId) {
             destination: "/app/chat.sendMessage",
             body: JSON.stringify({
               roomId,
-              senderId: senderId || undefined,
               content: imageUrlForMessage,
               type: "IMAGE",
             }),
@@ -207,7 +205,7 @@ export function useChat(roomId, senderId) {
           setError(message);
         }
       },
-      [getToken, roomId, senderId]
+      [getToken, roomId]
   );
 
   const clearMessages = useCallback(() => setMessages([]), []);

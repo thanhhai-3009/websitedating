@@ -34,6 +34,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080
 
 interface MatchApiResponse {
   userId: string;
+  clerkId?: string;
   displayName: string;
   age?: number;
   avatarUrl?: string;
@@ -45,6 +46,7 @@ interface MatchApiResponse {
 interface ConversationItem {
   id: string;
   userId: string;
+  clerkId?: string;
   roomId?: string;
   user: {
     name: string;
@@ -118,6 +120,7 @@ export default function Messages() {
   const [conversationsError, setConversationsError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const localAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -152,6 +155,7 @@ export default function Messages() {
         const mappedConversations = (matchesResponse.data || []).map((match) => ({
           id: match.userId,
           userId: match.userId,
+          clerkId: match.clerkId,
           roomId: match.roomId,
           user: {
             name: match.displayName || "Match",
@@ -167,10 +171,21 @@ export default function Messages() {
 
         const hasPreselected =
           preselectedConversationId
-          && mappedConversations.some((conversation) => conversation.id === preselectedConversationId);
+          && mappedConversations.some(
+            (conversation) =>
+              conversation.id === preselectedConversationId
+              || conversation.userId === preselectedConversationId
+              || conversation.clerkId === preselectedConversationId
+          );
 
         if (hasPreselected) {
-          setSelectedConversation(preselectedConversationId);
+          const matchedConversation = mappedConversations.find(
+            (conversation) =>
+              conversation.id === preselectedConversationId
+              || conversation.userId === preselectedConversationId
+              || conversation.clerkId === preselectedConversationId
+          );
+          setSelectedConversation(matchedConversation?.id || null);
         } else if (!selectedConversation && mappedConversations.length > 0) {
           setSelectedConversation(mappedConversations[0].id);
         }
@@ -187,8 +202,13 @@ export default function Messages() {
 
     loadConversations();
 
+    const refreshId = window.setInterval(() => {
+      loadConversations();
+    }, 10000);
+
     return () => {
       isMounted = false;
+      window.clearInterval(refreshId);
     };
   }, [clerkId, isMessagesLocked, preselectedConversationId, selectedConversation]);
 
@@ -235,7 +255,22 @@ export default function Messages() {
     error,
     sendTextMessage,
     sendImageMessage,
-  } = useChat(effectiveRoomId, currentDbUserId);
+  } = useChat(effectiveRoomId);
+
+  const mappedLiveMessages = useMemo(() => {
+    return (liveMessages || []).map((msg: any, index: number) => {
+      const isImage = msg?.type === "IMAGE";
+      const mine = msg?.senderId ? msg.senderId === currentDbUserId || msg.senderId === userId : false;
+      return {
+        id: msg?.id || `${msg?.timestamp || "msg"}-${index}`,
+        message: isImage ? "" : msg?.content || "",
+        image: isImage ? msg?.content : undefined,
+        timestamp: toDisplayTimestamp(msg?.timestamp),
+        isOwn: mine,
+        status: mine ? ("sent" as const) : undefined,
+      };
+    });
+  }, [currentDbUserId, liveMessages, userId]);
 
   const {
     isInCall,
@@ -249,7 +284,13 @@ export default function Messages() {
     acceptIncomingCall,
     rejectIncomingCall,
     endCall,
-  } = useWebRTC(effectiveRoomId, currentDbUserId);
+  } = useWebRTC(effectiveRoomId, clerkId);
+
+  const callTargetId = selectedChat?.clerkId || null;
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [mappedLiveMessages.length, selectedConversation]);
 
   useEffect(() => {
     if (localVideoRef.current) {
@@ -271,21 +312,6 @@ export default function Messages() {
       remoteAudioRef.current.play().catch(() => {});
     }
   }, [remoteStream]);
-
-  const mappedLiveMessages = useMemo(() => {
-    return (liveMessages || []).map((msg: any, index: number) => {
-      const isImage = msg?.type === "IMAGE";
-      const mine = msg?.senderId ? msg.senderId === currentDbUserId || msg.senderId === userId : false;
-      return {
-        id: msg?.id || `${msg?.timestamp || "msg"}-${index}`,
-        message: isImage ? "" : msg?.content || "",
-        image: isImage ? msg?.content : undefined,
-        timestamp: toDisplayTimestamp(msg?.timestamp),
-        isOwn: mine,
-        status: mine ? ("sent" as const) : undefined,
-      };
-    });
-  }, [currentDbUserId, liveMessages, userId]);
 
   const handleSendMessage = async (message: string) => {
     if (!message.trim()) return;
@@ -339,9 +365,6 @@ export default function Messages() {
           </div>
 
           <div className="flex-1 overflow-y-auto">
-            {isLoadingConversations && (
-              <p className="p-4 text-sm text-muted-foreground">Loading matches...</p>
-            )}
             {!isLoadingConversations && filteredConversations.length === 0 && (
               <p className="p-4 text-sm text-muted-foreground">No conversations from backend yet.</p>
             )}
@@ -426,10 +449,10 @@ export default function Messages() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" onClick={() => startAudioCall(selectedChat.userId)}>
+                  <Button variant="ghost" size="icon" onClick={() => startAudioCall(callTargetId)}>
                     <Phone className="w-5 h-5" />
                   </Button>
-                  <Button variant="ghost" size="icon" onClick={() => startVideoCall(selectedChat.userId)}>
+                  <Button variant="ghost" size="icon" onClick={() => startVideoCall(callTargetId)}>
                     <Video className="w-5 h-5" />
                   </Button>
                   <Button variant="ghost" size="icon">
@@ -461,6 +484,7 @@ export default function Messages() {
                     />
                   ))
                 )}
+                <div ref={messagesEndRef} />
               </div>
 
               <ChatInput
@@ -468,7 +492,7 @@ export default function Messages() {
                 onImageClick={handleImageClick}
                 onEmojiSelect={appendEmoji}
                 emojiOptions={emojiList}
-                onVideoCall={() => startVideoCall(selectedChat.userId)}
+                onVideoCall={() => startVideoCall(callTargetId)}
                 value={draftMessage}
                 onChange={setDraftMessage}
               />
