@@ -75,6 +75,13 @@ public class WebSocketPresenceService {
         subscriptions.values().forEach(roomId -> decrementRoomCount(clerkId, roomId));
     }
 
+    public boolean isUserConnected(String clerkId) {
+        if (isBlank(clerkId)) {
+            return false;
+        }
+        return sessionToUser.containsValue(clerkId);
+    }
+
     public boolean isUserActiveInRoom(String clerkId, String roomId) {
         if (isBlank(clerkId) || isBlank(roomId)) {
             return false;

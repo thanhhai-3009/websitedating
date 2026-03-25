@@ -481,6 +481,9 @@ const Appointments = () => {
               )}
             </TabsContent>
 
+
+
+
             <TabsContent value="past" className="space-y-4">
               {past.map(apt => (
                 <AppointmentCard key={apt.id} apt={apt} showActions={false} />

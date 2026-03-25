@@ -187,8 +187,13 @@ export default function Messages() {
 
     loadConversations();
 
+    const refreshId = window.setInterval(() => {
+      loadConversations();
+    }, 10000);
+
     return () => {
       isMounted = false;
+      window.clearInterval(refreshId);
     };
   }, [clerkId, isMessagesLocked, preselectedConversationId, selectedConversation]);
 
