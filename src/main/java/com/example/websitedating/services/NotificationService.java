@@ -147,4 +147,9 @@ public class NotificationService {
                         "/queue/notifications",
                         saved));
     }
+
+            // Public helper to persist and push a notification immediately
+            public void saveAndPush(Notification notification) {
+                persistAndPush(notification);
+            }
 }

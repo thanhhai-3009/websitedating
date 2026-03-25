@@ -25,7 +25,7 @@ public class Appointment {
     private List<TimeSlot> suggestedTimeSlots;
     private Instant scheduledTime;
     private EstimatedCost estimatedCost;
-    @Builder.Default private AppointmentStatus status = AppointmentStatus.scheduled;
+    @Builder.Default private AppointmentStatus status = AppointmentStatus.proposed;
     @Builder.Default private SuggestionSource suggestionSource = SuggestionSource.manual;
     private List<Feedback> feedbacks;
     private String updatedBy;
