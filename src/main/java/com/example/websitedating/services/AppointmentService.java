@@ -4,6 +4,7 @@ import com.example.websitedating.models.Appointment;
 import com.example.websitedating.models.Notification;
 import com.example.websitedating.constants.CommonEnums.NotificationType;
 import com.example.websitedating.repository.NotificationRepository;
+import com.example.websitedating.services.NotificationService;
 import com.example.websitedating.repository.AppointmentRepository;
 import com.example.websitedating.repository.UserRepository;
 import java.util.List;
@@ -16,11 +17,13 @@ public class AppointmentService {
     private final AppointmentRepository repo;
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
 
-    public AppointmentService(AppointmentRepository repo, NotificationRepository notificationRepository, UserRepository userRepository) {
+    public AppointmentService(AppointmentRepository repo, NotificationRepository notificationRepository, UserRepository userRepository, NotificationService notificationService) {
         this.repo = repo;
         this.notificationRepository = notificationRepository;
         this.userRepository = userRepository;
+        this.notificationService = notificationService;
     }
 
     public Appointment create(Appointment appt) {
@@ -48,12 +51,13 @@ public class AppointmentService {
                 }
 
                 Notification note = Notification.builder()
-                        .userId(notifUserId)
-                        .type(NotificationType.upcoming_appointment)
-                        .content("You have a new date appointment scheduled.")
-                        .data(Map.of("appointmentId", saved.getId(), "creatorId", saved.getCreatorId()))
-                        .build();
-                notificationRepository.save(note);
+                    .userId(notifUserId)
+                    .type(NotificationType.upcoming_appointment)
+                    .content("You have a new date appointment scheduled.")
+                    .data(Map.of("appointmentId", saved.getId(), "creatorId", saved.getCreatorId()))
+                    .build();
+                // persist and push realtime
+                notificationService.saveAndPush(note);
             }
         } catch (Exception ex) {
             // log but don't fail the appointment creation
