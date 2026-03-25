@@ -434,7 +434,8 @@ const Appointments = () => {
                       const end = start ? addHours(start, 2) : null;
                       const userHasContinued = isCreator ? !!apt.creatorContinued : !!apt.participantContinued;
 
-                      if (start && now >= start && (!userHasContinued)) {
+                      // show Continue only while appointment window is active (start..end)
+                      if (start && now >= start && end && now <= end && (!userHasContinued)) {
                         return (
                           <>
                             <Button size="sm" variant="outline" className="gap-1" onClick={() => sendContinue(apt.id)}>Continue</Button>
@@ -443,12 +444,10 @@ const Appointments = () => {
                         );
                       }
 
-                      // if both continued and now after end -> show complete
-                      if (start && end && now > end && apt.creatorContinued && apt.participantContinued) {
+                      // when appointment window ended, allow either creator or participant to complete
+                      if (start && end && now > end && (isCreator || isParticipant)) {
                         return (
-                          <>
-                            <Button size="sm" variant="gradient" className="gap-1" onClick={() => completeAppointment(apt.id)}>Complete</Button>
-                          </>
+                          <Button size="sm" variant="gradient" className="gap-1" onClick={() => completeAppointment(apt.id)}>Complete</Button>
                         );
                       }
                     }
