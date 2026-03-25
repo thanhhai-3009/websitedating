@@ -122,8 +122,11 @@ export default function Messages() {
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const localAudioRef = useRef<HTMLAudioElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const hasAutoSelectedRef = useRef(false);
 
   useEffect(() => {
+    hasAutoSelectedRef.current = false;
     let isMounted = true;
 
     const loadConversations = async () => {
@@ -165,14 +168,18 @@ export default function Messages() {
 
         setConversations(mappedConversations);
 
-        const hasPreselected =
-          preselectedConversationId
-          && mappedConversations.some((conversation) => conversation.id === preselectedConversationId);
+        if (!hasAutoSelectedRef.current) {
+          const hasPreselected =
+            preselectedConversationId
+            && mappedConversations.some((conversation) => conversation.id === preselectedConversationId);
 
-        if (hasPreselected) {
-          setSelectedConversation(preselectedConversationId);
-        } else if (!selectedConversation && mappedConversations.length > 0) {
-          setSelectedConversation(mappedConversations[0].id);
+          if (hasPreselected) {
+            setSelectedConversation(preselectedConversationId);
+            hasAutoSelectedRef.current = true;
+          } else if (mappedConversations.length > 0) {
+            setSelectedConversation(mappedConversations[0].id);
+            hasAutoSelectedRef.current = true;
+          }
         }
       } catch (loadError: any) {
         if (!isMounted) return;
@@ -187,15 +194,13 @@ export default function Messages() {
 
     loadConversations();
 
-    const refreshId = window.setInterval(() => {
-      loadConversations();
-    }, 10000);
+    const refreshId = window.setInterval(loadConversations, 5000);
 
     return () => {
       isMounted = false;
       window.clearInterval(refreshId);
     };
-  }, [clerkId, isMessagesLocked, preselectedConversationId, selectedConversation]);
+  }, [clerkId, isMessagesLocked, preselectedConversationId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -292,6 +297,12 @@ export default function Messages() {
     });
   }, [currentDbUserId, liveMessages, userId]);
 
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [mappedLiveMessages]);
+
   const handleSendMessage = async (message: string) => {
     if (!message.trim()) return;
     await sendTextMessage(message.trim());
@@ -344,9 +355,6 @@ export default function Messages() {
           </div>
 
           <div className="flex-1 overflow-y-auto">
-            {isLoadingConversations && (
-              <p className="p-4 text-sm text-muted-foreground">Loading matches...</p>
-            )}
             {!isLoadingConversations && filteredConversations.length === 0 && (
               <p className="p-4 text-sm text-muted-foreground">No conversations from backend yet.</p>
             )}
@@ -466,6 +474,7 @@ export default function Messages() {
                     />
                   ))
                 )}
+                <div ref={messagesEndRef} />
               </div>
 
               <ChatInput

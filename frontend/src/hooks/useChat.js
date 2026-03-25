@@ -85,6 +85,8 @@ export function useChat(roomId, senderId) {
         setError(null);
         setIsConnected(true);
 
+        loadHistory();
+
         client.subscribe(subscriptionTopic, (frame) => {
           try {
             const incoming = JSON.parse(frame.body);
