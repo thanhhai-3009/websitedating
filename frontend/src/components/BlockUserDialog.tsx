@@ -1,20 +1,53 @@
+import { useState } from "react";
+import { useAuth, useUser } from "@clerk/clerk-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ShieldOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { getApiToken } from "@/lib/clerkToken";
 
 interface BlockUserDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   userName: string;
+  targetUserId: string;
+  onBlocked?: () => void;
 }
 
-export const BlockUserDialog = ({ open, onOpenChange, userName }: BlockUserDialogProps) => {
+export const BlockUserDialog = ({ open, onOpenChange, userName, targetUserId, onBlocked }: BlockUserDialogProps) => {
   const { toast } = useToast();
+  const { getToken } = useAuth();
+  const { user } = useUser();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleBlock = () => {
-    toast({ title: `${userName} blocked`, description: "They won't be able to see your profile or contact you." });
-    onOpenChange(false);
+  const handleBlock = async () => {
+    if (!user) return;
+    setIsSubmitting(true);
+    try {
+      const token = await getApiToken(getToken);
+      const response = await fetch("http://localhost:8080/api/moderation/block", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          clerkId: user.id,
+          targetUserId: targetUserId,
+          reason: "Blocked from UI"
+        })
+      });
+
+      if (!response.ok) throw new Error("Failed to block user");
+
+      toast({ title: `${userName} blocked`, description: "They won't be able to see your profile or contact you." });
+      onOpenChange(false);
+      if (onBlocked) onBlocked();
+    } catch (error) {
+      toast({ title: "Error", description: "Could not block user. Try again later.", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -37,10 +70,13 @@ export const BlockUserDialog = ({ open, onOpenChange, userName }: BlockUserDialo
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button variant="destructive" onClick={handleBlock}>Block User</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>Cancel</Button>
+          <Button variant="destructive" onClick={handleBlock} disabled={isSubmitting}>
+            {isSubmitting ? "Blocking..." : "Block User"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 };
+
