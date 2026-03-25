@@ -101,16 +101,14 @@ const Appointments = () => {
 
     try {
       const token = await getApiToken(getToken);
-                                  if (found) {
-                                    const n = (found.displayName || found.username || found.name || 'Match');
-                                    setEditParticipantName(n && n.normalize ? n.normalize('NFC') : n);
+      if (!token) {
+        setReviewsByAppointmentId({});
         return;
       }
 
       const params = new URLSearchParams();
-                                        const u = await ures.json();
-                                        const n = u?.username || u?.displayName || 'Match';
-                                        setEditParticipantName(n && n.normalize ? n.normalize('NFC') : n);
+      appointmentIds.forEach((id) => params.append("appointmentIds", id));
+
       const response = await fetch(`/api/date-reviews/mine?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
