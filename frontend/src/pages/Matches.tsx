@@ -203,13 +203,12 @@ export default function Matches() {
             </TabsList>
 
             <TabsContent value="matches" className="space-y-8">
-              {loading && <p className="text-center text-muted-foreground">Loading matches...</p>}
-              {!loading && fetchError && <p className="text-center text-destructive">{fetchError}</p>}
-              {!loading && !fetchError && matches.length === 0 && (
+              {fetchError && <p className="text-center text-destructive">{fetchError}</p>}
+              {!fetchError && matches.length === 0 && (
                 <p className="text-center text-muted-foreground">No matches yet. Keep discovering people to get more matches.</p>
               )}
 
-              {!loading && !fetchError && likedYou.length > 0 && (
+              {!fetchError && likedYou.length > 0 && (
                 <section>
                   <h2 className="font-serif text-xl font-semibold text-foreground mb-4 flex items-center gap-2">
                     <Heart className="w-5 h-5 text-primary" />
@@ -238,7 +237,7 @@ export default function Matches() {
               )}
 
               {/* New Matches */}
-              {!loading && !fetchError && newMatches.length > 0 && (
+              {!fetchError && newMatches.length > 0 && (
                 <section>
                   <h2 className="font-serif text-xl font-semibold text-foreground mb-4 flex items-center gap-2">
                     <Sparkles className="w-5 h-5 text-gold" />
@@ -266,7 +265,7 @@ export default function Matches() {
               )}
 
               {/* All Matches */}
-              {!loading && !fetchError && allMatches.length > 0 && (
+              {!fetchError && allMatches.length > 0 && (
                 <section>
                   <h2 className="font-serif text-xl font-semibold text-foreground mb-4">
                     All Matches
@@ -293,7 +292,6 @@ export default function Matches() {
             </TabsContent>
 
             <TabsContent value="likes">
-              {loading && <p className="text-center text-muted-foreground">Loading likes...</p>}
               {!loading && fetchError && <p className="text-center text-destructive">{fetchError}</p>}
               {!loading && !fetchError && likedYou.length === 0 && (
                 <p className="text-center text-muted-foreground">No one has liked you yet.</p>
@@ -322,7 +320,6 @@ export default function Matches() {
             </TabsContent>
 
             <TabsContent value="sent">
-              {loading && <p className="text-center text-muted-foreground">Loading sent invites...</p>}
               {!loading && fetchError && <p className="text-center text-destructive">{fetchError}</p>}
               {!loading && !fetchError && pendingSentInvites.length === 0 && (
                 <p className="text-center text-muted-foreground">You have no pending invites right now.</p>
