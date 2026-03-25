@@ -11,7 +11,8 @@ import { CalendarDays, Clock, MapPin, MessageCircle, Star, Trash2, Edit, Plus } 
 import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import { useUser } from "@clerk/clerk-react";
+import { useUser, useAuth } from "@clerk/clerk-react";
+import { getApiToken } from "@/lib/clerkToken";
 
 interface Appointment {
   id: string;
@@ -28,6 +29,17 @@ interface Appointment {
   creatorContinued?: boolean;
   participantContinued?: boolean;
   note?: string;
+}
+
+interface DateReviewSummary {
+  id: string;
+  appointmentId: string;
+  updatedAt?: string;
+}
+
+interface ResolvedUserResponse {
+  id: string;
+  clerkId: string;
 }
 
 // will be fetched from API
@@ -47,28 +59,110 @@ const Appointments = () => {
   const [matchedUsers, setMatchedUsers] = useState<Array<any>>([]);
   const [editAptRaw, setEditAptRaw] = useState<any | null>(null);
   const [editParticipantName, setEditParticipantName] = useState<string | null>(null);
+  const [editCreatorName, setEditCreatorName] = useState<string | null>(null);
   const [editUiStatus, setEditUiStatus] = useState<string>("pending");
+  const [selfDbUserId, setSelfDbUserId] = useState<string | null>(null);
+  const [reviewsByAppointmentId, setReviewsByAppointmentId] = useState<Record<string, DateReviewSummary>>({});
   const { toast } = useToast();
   const { user } = useUser();
+  const { getToken } = useAuth();
+
+  useEffect(() => {
+    let cancelled = false;
+    const resolveDbUser = async () => {
+      if (!user?.id) {
+        setSelfDbUserId(null);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/users/resolve/${encodeURIComponent(user.id)}`);
+        if (!res.ok) throw new Error("Cannot resolve current user");
+        const data = (await res.json()) as ResolvedUserResponse;
+        if (!cancelled) {
+          setSelfDbUserId(data?.id || null);
+        }
+      } catch {
+        if (!cancelled) {
+          setSelfDbUserId(null);
+        }
+      }
+    };
+    resolveDbUser();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  const loadMyReviews = async (appointmentIds: string[]) => {
+    if (!appointmentIds.length) {
+      setReviewsByAppointmentId({});
+      return;
+    }
+
+    try {
+      const token = await getApiToken(getToken);
+                                  if (found) {
+                                    const n = (found.displayName || found.username || found.name || 'Match');
+                                    setEditParticipantName(n && n.normalize ? n.normalize('NFC') : n);
+        return;
+      }
+
+      const params = new URLSearchParams();
+                                        const u = await ures.json();
+                                        const n = u?.username || u?.displayName || 'Match';
+                                        setEditParticipantName(n && n.normalize ? n.normalize('NFC') : n);
+      const response = await fetch(`/api/date-reviews/mine?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        throw new Error("Cannot load date reviews");
+      }
+
+      const reviewList = (await response.json()) as DateReviewSummary[];
+      const nextMap: Record<string, DateReviewSummary> = {};
+      (reviewList || []).forEach((value) => {
+        if (value?.appointmentId) {
+          nextMap[value.appointmentId] = value;
+        }
+      });
+      setReviewsByAppointmentId(nextMap);
+    } catch {
+      setReviewsByAppointmentId({});
+    }
+  };
 
   const fetchAppointments = async () => {
     const clerkId = user?.id;
+    const currentUserId = selfDbUserId;
     if (!clerkId) return;
     try {
-      const res = await fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`);
-      if (!res.ok) throw new Error('Failed to fetch');
-      const data = await res.json();
+      const [resDb, resClerk] = await Promise.all([
+        currentUserId ? fetch(`/api/appointments?userId=${encodeURIComponent(currentUserId)}`) : Promise.resolve(null),
+        fetch(`/api/appointments?userId=${encodeURIComponent(clerkId)}`),
+      ]);
+
+      const dbData = resDb && resDb.ok ? await resDb.json() : [];
+      const clerkData = resClerk.ok ? await resClerk.json() : [];
+      const mergedById = new Map<string, any>();
+      [...(Array.isArray(dbData) ? dbData : []), ...(Array.isArray(clerkData) ? clerkData : [])].forEach((item) => {
+        const key = item?.id || item?._id;
+        if (key) {
+          mergedById.set(String(key), item);
+        }
+      });
+      const data = Array.from(mergedById.values());
       // also fetch matched users so we can resolve participantId -> display name
-          let mdata: any[] = [];
-          try {
-            const mres = await fetch(`/api/discovery/matches?clerkId=${encodeURIComponent(clerkId)}&limit=200`);
-            if (mres.ok) {
-              mdata = await mres.json();
-              setMatchedUsers(mdata || []);
-            }
-          } catch (e) {
-            console.error('Could not load matches', e);
-          }
+      let mdata: any[] = [];
+      try {
+        const mres = await fetch(`/api/discovery/matches?clerkId=${encodeURIComponent(clerkId)}&limit=200`);
+        if (mres.ok) {
+          mdata = await mres.json();
+          setMatchedUsers(mdata || []);
+        }
+      } catch (e) {
+        console.error('Could not load matches', e);
+      }
 
       // normalize server shape to UI shape
       const mapBackendToUI = (s: any): Appointment["status"] => {
@@ -93,27 +187,26 @@ const Appointments = () => {
         }
       };
 
-      // build a quick lookup from matchedUsers returned above
-          // build a quick lookup from matches we just fetched (use local mdata to avoid stale state)
-          const matchLookup = new Map<string,string>();
-          (mdata || []).forEach((m:any) => {
-            const displayName = m.displayName || m.username || m.name || "Match";
-            const keys = [m.clerkId, m.userId, m.id].filter(Boolean).map((k: any) => String(k));
-            keys.forEach((k: string) => matchLookup.set(k, displayName));
-          });
+      const matchLookup = new Map<string, string>();
+      (mdata || []).forEach((m: any) => {
+        const raw = m.displayName || m.username || m.name || "Match";
+        const displayName = (raw && raw.normalize) ? raw.normalize('NFC') : raw;
+        const keys = [m.clerkId, m.userId, m.id].filter(Boolean).map((k: any) => String(k));
+        keys.forEach((k: string) => matchLookup.set(k, displayName));
+      });
 
       const appointmentList = Array.isArray(data) ? data : [];
-      const participantIdsToResolve = Array.from(
-        new Set(
-          appointmentList
-            .map((it: any) => (it?.participantId ? String(it.participantId) : ""))
-            .filter((id: string) => !!id && !matchLookup.has(id) && id.startsWith("user_")),
-        ),
+      // resolve both participant and creator ids that are not present in matchLookup
+      const idsToResolve = Array.from(
+        new Set(appointmentList
+          .flatMap((it: any) => [it?.participantId ? String(it.participantId) : "", it?.creatorId ? String(it.creatorId) : ""]) 
+          .filter((id: string) => !!id && !matchLookup.has(id))
+        )
       );
 
-      if (participantIdsToResolve.length > 0) {
+      if (idsToResolve.length > 0) {
         const resolved = await Promise.all(
-          participantIdsToResolve.map(async (clerkIdToResolve: string) => {
+          idsToResolve.map(async (clerkIdToResolve: string) => {
             try {
               const r = await fetch(`/api/users/resolve/${encodeURIComponent(clerkIdToResolve)}`);
               if (!r.ok) return null;
@@ -139,11 +232,24 @@ const Appointments = () => {
       const mapped = appointmentList.map((it: any) => {
         const scheduled = it.scheduledTime ? new Date(it.scheduledTime) : null;
         const rawParticipantId = it.participantId ? String(it.participantId) : "";
-        const resolvedName = matchLookup.get(rawParticipantId) || "Match";
-        const initials = resolvedName.split(" ").map((s: string) => s[0]).slice(0,2).join("") || (resolvedName.substring(0,2) || "M");
+        const rawCreatorId = it.creatorId ? String(it.creatorId) : "";
+        const participantName = matchLookup.get(rawParticipantId) || (rawParticipantId ? rawParticipantId : null) || "Match";
+        const creatorName = matchLookup.get(rawCreatorId) || (rawCreatorId ? rawCreatorId : null) || null;
+        const displayNameCombined = creatorName ? `${creatorName} & ${participantName}` : participantName;
+        const normalizeStr = (str: string) => (str && str.normalize) ? str.normalize('NFC') : str;
+        const firstGrapheme = (str: string) => {
+          const s = normalizeStr(str || '');
+          try {
+            const arr = Array.from(s);
+            return arr.length ? arr[0] : '';
+          } catch {
+            return s.charAt(0) || '';
+          }
+        };
+        const initials = (participantName.split(" ").map((s: string) => firstGrapheme(s)).slice(0,2).join("") || (participantName.substring(0,2) || "M")).toUpperCase();
         return {
           id: it.id || it._id || "",
-          matchName: resolvedName,
+          matchName: displayNameCombined,
           matchInitials: initials || "M",
           spot: it.location?.placeName || "",
           location: it.location?.address || "",
@@ -152,19 +258,27 @@ const Appointments = () => {
           status: mapBackendToUI(it.status),
           creatorId: it.creatorId || null,
           participantId: it.participantId || null,
+          creatorName: creatorName,
+          participantName: participantName,
           scheduledISO: it.scheduledTime || null,
           creatorContinued: !!it.creatorContinued,
           participantContinued: !!it.participantContinued,
           note: it.note || it.description || "",
         } as Appointment;
       });
+
       setAppointments(mapped);
+
+      const completedIds = mapped.filter((value) => value.status === "completed").map((value) => value.id);
+      await loadMyReviews(completedIds);
     } catch (err) {
       console.error(err);
     }
   };
 
-  useEffect(() => { fetchAppointments(); }, [user]);
+  useEffect(() => {
+    fetchAppointments();
+  }, [user, selfDbUserId]);
 
   const now = new Date();
 
@@ -230,8 +344,12 @@ const Appointments = () => {
                   {/* role-based actions */}
                   {(() => {
                     const sched = parseISO(apt.scheduledISO);
-                    const isCreator = user?.id && apt.creatorId && String(user.id) === String(apt.creatorId);
-                    const isParticipant = user?.id && apt.participantId && String(user.id) === String(apt.participantId);
+                    const isCreator = Boolean(apt.creatorId) && (
+                      String(apt.creatorId) === String(selfDbUserId || "") || String(apt.creatorId) === String(user?.id || "")
+                    );
+                    const isParticipant = Boolean(apt.participantId) && (
+                      String(apt.participantId) === String(selfDbUserId || "") || String(apt.participantId) === String(user?.id || "")
+                    );
 
                     const acceptAppointment = async (id: string) => {
                       try {
@@ -305,7 +423,6 @@ const Appointments = () => {
                       const start = sched;
                       const end = start ? addHours(start, 2) : null;
                       const userHasContinued = isCreator ? !!apt.creatorContinued : !!apt.participantContinued;
-                      const otherContinued = isCreator ? !!apt.participantContinued : !!apt.creatorContinued;
 
                       if (start && now >= start && (!userHasContinued)) {
                         return (
@@ -336,6 +453,7 @@ const Appointments = () => {
                             const data = await res.json();
                                 setEditAptRaw(data);
                                 const pid = data?.participantId ? String(data.participantId) : null;
+                                const cid = data?.creatorId ? String(data.creatorId) : null;
                                 if (pid) {
                                   const found = (matchedUsers || []).find((m:any) => {
                                     const ids = [m.clerkId, m.userId, m.id].filter(Boolean).map((v:any) => String(v));
@@ -343,23 +461,46 @@ const Appointments = () => {
                                   });
                                   if (found) {
                                     setEditParticipantName(found.displayName || found.username || found.name || 'Match');
-                                  } else if (pid.startsWith('user_')) {
+                                  } else {
                                     try {
                                       const ures = await fetch(`/api/users/resolve/${encodeURIComponent(pid)}`);
                                       if (ures.ok) {
                                         const u = await ures.json();
-                                        setEditParticipantName(u?.username || 'Match');
+                                        setEditParticipantName(u?.username || u?.displayName || 'Match');
                                       } else {
                                         setEditParticipantName('Match');
                                       }
                                     } catch {
                                       setEditParticipantName('Match');
                                     }
-                                  } else {
-                                    setEditParticipantName('Match');
                                   }
                                 } else {
                                   setEditParticipantName(null);
+                                }
+                                if (cid) {
+                                  const foundC = (matchedUsers || []).find((m:any) => {
+                                    const ids = [m.clerkId, m.userId, m.id].filter(Boolean).map((v:any) => String(v));
+                                    return ids.includes(cid);
+                                  });
+                                  if (foundC) {
+                                    const n = (foundC.displayName || foundC.username || foundC.name || null);
+                                    setEditCreatorName(n && n.normalize ? n.normalize('NFC') : n);
+                                  } else {
+                                    try {
+                                      const cres = await fetch(`/api/users/resolve/${encodeURIComponent(cid)}`);
+                                      if (cres.ok) {
+                                        const cu = await cres.json();
+                                        const n = cu?.username || cu?.displayName || null;
+                                        setEditCreatorName(n && n.normalize ? n.normalize('NFC') : n);
+                                      } else {
+                                        setEditCreatorName(null);
+                                      }
+                                    } catch {
+                                      setEditCreatorName(null);
+                                    }
+                                  }
+                                } else {
+                                  setEditCreatorName(null);
                                 }
                             const ui = (s: any) => {
                               if (!s) return 'pending';
@@ -377,7 +518,8 @@ const Appointments = () => {
                         }}><Edit className="w-3.5 h-3.5" />Edit</Button>
 
                         <Button size="sm" variant="outline" className="gap-1" onClick={() => {
-                          navigate('/messages', { state: { selectedConversationId: apt.matchName } });
+                          const counterpartId = isCreator ? apt.participantId : apt.creatorId;
+                          navigate('/messages', { state: { selectedConversationId: counterpartId || apt.matchName } });
                         }}><MessageCircle className="w-3.5 h-3.5" />Chat</Button>
 
                         <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
@@ -391,7 +533,10 @@ const Appointments = () => {
               {apt.status === "completed" && (
                 <div className="mt-3">
                   <Button size="sm" variant="soft" className="gap-1" asChild>
-                    <Link to={`/review/${apt.id}`}><Star className="w-3.5 h-3.5" />Leave Review</Link>
+                    <Link to={`/review/${apt.id}`}>
+                      <Star className="w-3.5 h-3.5" />
+                      {reviewsByAppointmentId[apt.id] ? "View/Edit Review" : "Write Review"}
+                    </Link>
                   </Button>
                 </div>
               )}
@@ -468,7 +613,9 @@ const Appointments = () => {
           <div className="space-y-4 mt-2">
             <div>
               <label className="block text-sm text-muted-foreground mb-1">Match</label>
-              <div className="text-foreground">{editParticipantName || editAptRaw?.participant || editAptRaw?.participantId || '—'}</div>
+              <div className="text-foreground">
+                {(editCreatorName || editAptRaw?.creator || editAptRaw?.creatorId || '—') + ' — ' + (editParticipantName || editAptRaw?.participant || editAptRaw?.participantId || '—')}
+              </div>
             </div>
             <div>
               <label className="block text-sm text-muted-foreground mb-1">Place</label>
