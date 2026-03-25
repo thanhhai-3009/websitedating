@@ -280,7 +280,7 @@ export default function Messages() {
         id: msg?.id || `${msg?.timestamp || "msg"}-${index}`,
         message: isImage ? "" : msg?.content || "",
         image: isImage ? msg?.content : undefined,
-        timestamp: toDisplayTi(msg?.timestamp),
+        timestamp: toDisplayTimestamp(msg?.timestamp),
         isOwn: mine,
         status: mine ? ("sent" as const) : undefined,
       };
