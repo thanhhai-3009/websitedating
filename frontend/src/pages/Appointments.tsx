@@ -290,12 +290,24 @@ const Appointments = () => {
   // - otherwise confirmed/pending -> upcoming
   const upcoming = appointments.filter(a => {
     const sched = parseISO(a.scheduledISO);
-    if (!sched) return a.status === 'confirmed' || a.status === 'pending';
-    if (a.status === 'pending' && now > sched) return false; // move to past
+    if (!sched) return a.status === 'confirmed' || a.status === 'pending' || a.status === 'incomplete';
+    const end = addHours(sched, 2);
+    // pending where scheduledTime already passed -> past
+    if (a.status === 'pending' && now > sched) return false;
+    // confirmed but appointment window ended -> past
+    if (a.status === 'confirmed' && end && now > end) return false;
     return a.status === 'confirmed' || a.status === 'pending' || a.status === 'incomplete';
   });
+
   const past = appointments.filter(a => {
-    return a.status === 'completed' || a.status === 'cancelled' || (a.status === 'pending' && a.scheduledISO && now > new Date(a.scheduledISO));
+    const sched = parseISO(a.scheduledISO);
+    const end = sched ? addHours(sched, 2) : null;
+    return (
+      a.status === 'completed' ||
+      a.status === 'cancelled' ||
+      (a.status === 'pending' && sched && now > sched) ||
+      (a.status === 'confirmed' && end && now > end)
+    );
   });
 
   const handleCancel = () => {
