@@ -106,6 +106,8 @@ const BookAppointment = () => {
       creatorId: user.id,
       participantId: matchUser,
       title: "Date Appointment",
+      status: "proposed",
+      note: note.trim(),
       location: { placeName: selectedSpotObj?.name || "", address: selectedSpotObj?.location || "" },
       scheduledTime: scheduledIso.toISOString(),
       estimatedCost: { min: estimate.min, max: estimate.max, currency: "VND" }
@@ -144,6 +146,8 @@ const BookAppointment = () => {
       // conflict if any existing appointment has the same date/time
       const conflict = (userAppointments || []).some((a) => {
         if (!a.scheduledTime) return false;
+        const status = String(a.status || "").toLowerCase();
+        if (status === "canceled" || status === "cancelled" || status === "completed") return false;
         const s = new Date(a.scheduledTime);
         return s.getFullYear() === slotDate.getFullYear() && s.getMonth() === slotDate.getMonth() && s.getDate() === slotDate.getDate() && s.getHours() === slotDate.getHours() && s.getMinutes() === slotDate.getMinutes();
       });

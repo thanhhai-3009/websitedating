@@ -32,11 +32,12 @@ interface Appointment {
 
 // will be fetched from API
 
-const statusConfig: Record<string, { label: string; className: string }> = {
+const statusConfig: Record<Appointment["status"], { label: string; className: string }> = {
   confirmed: { label: "Confirmed", className: "bg-success/10 text-success border-success/20" },
   pending: { label: "Pending", className: "bg-accent/10 text-accent border-accent/20" },
   completed: { label: "Completed", className: "bg-primary/10 text-primary border-primary/20" },
   cancelled: { label: "Cancelled", className: "bg-destructive/10 text-destructive border-destructive/20" },
+  incomplete: { label: "Incomplete", className: "bg-muted text-muted-foreground border-border" },
 };
 
 const Appointments = () => {
@@ -70,7 +71,7 @@ const Appointments = () => {
           }
 
       // normalize server shape to UI shape
-      const mapBackendToUI = (s: any) => {
+      const mapBackendToUI = (s: any): Appointment["status"] => {
         if (!s) return 'pending';
         const st = String(s).toLowerCase();
         switch (st) {
@@ -85,9 +86,10 @@ const Appointments = () => {
             return 'completed';
           case 'pending':
           case 'confirmed':
-            return st;
+          case 'incomplete':
+            return st as Appointment["status"];
           default:
-            return st;
+            return 'pending';
         }
       };
 
@@ -95,14 +97,49 @@ const Appointments = () => {
           // build a quick lookup from matches we just fetched (use local mdata to avoid stale state)
           const matchLookup = new Map<string,string>();
           (mdata || []).forEach((m:any) => {
-            const id = m.clerkId ?? m.userId ?? m.id ?? null;
-            if (id) matchLookup.set(String(id), m.displayName || m.username || m.name || String(id));
+            const displayName = m.displayName || m.username || m.name || "Match";
+            const keys = [m.clerkId, m.userId, m.id].filter(Boolean).map((k: any) => String(k));
+            keys.forEach((k: string) => matchLookup.set(k, displayName));
           });
 
-      const mapped = (data || []).map((it: any) => {
+      const appointmentList = Array.isArray(data) ? data : [];
+      const participantIdsToResolve = Array.from(
+        new Set(
+          appointmentList
+            .map((it: any) => (it?.participantId ? String(it.participantId) : ""))
+            .filter((id: string) => !!id && !matchLookup.has(id) && id.startsWith("user_")),
+        ),
+      );
+
+      if (participantIdsToResolve.length > 0) {
+        const resolved = await Promise.all(
+          participantIdsToResolve.map(async (clerkIdToResolve: string) => {
+            try {
+              const r = await fetch(`/api/users/resolve/${encodeURIComponent(clerkIdToResolve)}`);
+              if (!r.ok) return null;
+              const u = await r.json();
+              const name = u?.username || clerkIdToResolve;
+              return {
+                clerkId: String(u?.clerkId || clerkIdToResolve),
+                userId: u?.id ? String(u.id) : null,
+                name,
+              };
+            } catch {
+              return null;
+            }
+          }),
+        );
+
+        resolved.filter(Boolean).forEach((u: any) => {
+          matchLookup.set(u.clerkId, u.name);
+          if (u.userId) matchLookup.set(u.userId, u.name);
+        });
+      }
+
+      const mapped = appointmentList.map((it: any) => {
         const scheduled = it.scheduledTime ? new Date(it.scheduledTime) : null;
         const rawParticipantId = it.participantId ? String(it.participantId) : "";
-        const resolvedName = matchLookup.get(rawParticipantId) || rawParticipantId || "Match";
+        const resolvedName = matchLookup.get(rawParticipantId) || "Match";
         const initials = resolvedName.split(" ").map((s: string) => s[0]).slice(0,2).join("") || (resolvedName.substring(0,2) || "M");
         return {
           id: it.id || it._id || "",
@@ -219,7 +256,7 @@ const Appointments = () => {
                         if (isCreator) data.creatorContinued = true;
                         if (isParticipant) data.participantContinued = true;
                         await fetch(`/api/appointments/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-                        toast({ title: 'Tiếp tục', description: 'Cảm ơn, chờ đối phương bấm tiếp tục.' });
+                        toast({ title: 'Continue', description: 'Thanks. Waiting for the other person to continue.' });
                         fetchAppointments();
                       } catch (e) {
                         console.error(e);
@@ -234,7 +271,7 @@ const Appointments = () => {
                         const data = await resGet.json();
                         data.status = 'completed';
                         await fetch(`/api/appointments/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-                        toast({ title: 'Hoàn thành', description: 'Cảm ơn bạn đã hoàn thành lịch hẹn.' });
+                        toast({ title: 'Completed', description: 'Thanks for completing the appointment.' });
                         fetchAppointments();
                       } catch (e) {
                         console.error(e);
@@ -246,9 +283,9 @@ const Appointments = () => {
                     if (apt.status === 'pending' && isParticipant) {
                       return (
                         <>
-                          <Button size="sm" variant="outline" className="gap-1" onClick={() => acceptAppointment(apt.id)}><Plus className="w-3.5 h-3.5" />Chấp nhận</Button>
+                          <Button size="sm" variant="outline" className="gap-1" onClick={() => acceptAppointment(apt.id)}><Plus className="w-3.5 h-3.5" />Accept</Button>
                           <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
-                            <Trash2 className="w-3.5 h-3.5" />Hủy
+                            <Trash2 className="w-3.5 h-3.5" />Cancel
                           </Button>
                         </>
                       );
@@ -258,13 +295,13 @@ const Appointments = () => {
                     if (apt.status === 'pending' && isCreator) {
                       return (
                         <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
-                          <Trash2 className="w-3.5 h-3.5" />Hủy
+                          <Trash2 className="w-3.5 h-3.5" />Cancel
                         </Button>
                       );
                     }
 
-                    // At scheduled time both can 'Tiếp tục'
-                    if (apt.status === 'confirmed' || apt.status === 'confirmed') {
+                    // At scheduled time both can continue.
+                    if (apt.status === 'confirmed') {
                       const start = sched;
                       const end = start ? addHours(start, 2) : null;
                       const userHasContinued = isCreator ? !!apt.creatorContinued : !!apt.participantContinued;
@@ -273,8 +310,8 @@ const Appointments = () => {
                       if (start && now >= start && (!userHasContinued)) {
                         return (
                           <>
-                            <Button size="sm" variant="outline" className="gap-1" onClick={() => sendContinue(apt.id)}>Tiếp tục</Button>
-                            <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>Hủy</Button>
+                            <Button size="sm" variant="outline" className="gap-1" onClick={() => sendContinue(apt.id)}>Continue</Button>
+                            <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>Cancel</Button>
                           </>
                         );
                       }
@@ -283,7 +320,7 @@ const Appointments = () => {
                       if (start && end && now > end && apt.creatorContinued && apt.participantContinued) {
                         return (
                           <>
-                            <Button size="sm" variant="gradient" className="gap-1" onClick={() => completeAppointment(apt.id)}>Hoàn thành</Button>
+                            <Button size="sm" variant="gradient" className="gap-1" onClick={() => completeAppointment(apt.id)}>Complete</Button>
                           </>
                         );
                       }
@@ -300,8 +337,27 @@ const Appointments = () => {
                                 setEditAptRaw(data);
                                 const pid = data?.participantId ? String(data.participantId) : null;
                                 if (pid) {
-                                  const found = (matchedUsers || []).find((m:any) => String(m.clerkId ?? m.userId ?? m.id) === pid);
-                                  setEditParticipantName(found ? (found.displayName || found.username || found.name) : pid);
+                                  const found = (matchedUsers || []).find((m:any) => {
+                                    const ids = [m.clerkId, m.userId, m.id].filter(Boolean).map((v:any) => String(v));
+                                    return ids.includes(pid);
+                                  });
+                                  if (found) {
+                                    setEditParticipantName(found.displayName || found.username || found.name || 'Match');
+                                  } else if (pid.startsWith('user_')) {
+                                    try {
+                                      const ures = await fetch(`/api/users/resolve/${encodeURIComponent(pid)}`);
+                                      if (ures.ok) {
+                                        const u = await ures.json();
+                                        setEditParticipantName(u?.username || 'Match');
+                                      } else {
+                                        setEditParticipantName('Match');
+                                      }
+                                    } catch {
+                                      setEditParticipantName('Match');
+                                    }
+                                  } else {
+                                    setEditParticipantName('Match');
+                                  }
                                 } else {
                                   setEditParticipantName(null);
                                 }
