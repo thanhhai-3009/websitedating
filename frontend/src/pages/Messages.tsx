@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Search,
@@ -112,6 +112,8 @@ export default function Messages() {
   const [selectedAudioInputId, setSelectedAudioInputId] = useState("");
   const [selectedVideoInputId, setSelectedVideoInputId] = useState("");
   const [selectedAudioOutputId, setSelectedAudioOutputId] = useState("");
+  const [hasMediaPermission, setHasMediaPermission] = useState(false);
+  const [isRequestingMediaPermission, setIsRequestingMediaPermission] = useState(false);
   const [devicesError, setDevicesError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -122,6 +124,82 @@ export default function Messages() {
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
   const hasAppliedPreselectedRef = useRef(false);
+
+  const speakerSelectionSupported = useMemo(() => {
+    if (typeof document === "undefined") {
+      return false;
+    }
+    const testAudio = document.createElement("audio") as HTMLAudioElement & {
+      setSinkId?: (deviceId: string) => Promise<void>;
+    };
+    return typeof testAudio.setSinkId === "function";
+  }, []);
+
+  const refreshMediaDevices = useCallback(async () => {
+    if (!navigator?.mediaDevices?.enumerateDevices) {
+      setDevicesError("Media device selection is not supported in this browser.");
+      return;
+    }
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inputs = devices.filter((device) => device.kind === "audioinput");
+    const cameras = devices.filter((device) => device.kind === "videoinput");
+    const outputs = devices.filter((device) => device.kind === "audiooutput");
+
+    setAudioInputDevices(inputs);
+    setVideoInputDevices(cameras);
+    setAudioOutputDevices(outputs);
+
+    setSelectedAudioInputId((previous) => {
+      if (previous && inputs.some((device) => device.deviceId === previous)) {
+        return previous;
+      }
+      return inputs[0]?.deviceId || "";
+    });
+
+    setSelectedVideoInputId((previous) => {
+      if (previous && cameras.some((device) => device.deviceId === previous)) {
+        return previous;
+      }
+      return cameras[0]?.deviceId || "";
+    });
+
+    setSelectedAudioOutputId((previous) => {
+      if (previous && outputs.some((device) => device.deviceId === previous)) {
+        return previous;
+      }
+      return outputs[0]?.deviceId || "";
+    });
+
+    const hasLabeledDevice = devices.some((device) => !!device.label);
+    if (hasLabeledDevice) {
+      setHasMediaPermission(true);
+    }
+    setDevicesError(null);
+  }, []);
+
+  const requestMediaPermission = useCallback(async () => {
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setDevicesError("Media permission is not supported in this browser.");
+      return;
+    }
+
+    setIsRequestingMediaPermission(true);
+    try {
+      const grantedStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: true,
+      });
+      grantedStream.getTracks().forEach((track) => track.stop());
+      setHasMediaPermission(true);
+      setDevicesError(null);
+      await refreshMediaDevices();
+    } catch (permissionError: any) {
+      setDevicesError(permissionError?.message || "Please allow camera and microphone access to select devices.");
+    } finally {
+      setIsRequestingMediaPermission(false);
+    }
+  }, [refreshMediaDevices]);
 
   useEffect(() => {
     hasAppliedPreselectedRef.current = false;
@@ -137,40 +215,7 @@ export default function Messages() {
 
     const loadDevices = async () => {
       try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        if (!isMounted) {
-          return;
-        }
-
-        const inputs = devices.filter((device) => device.kind === "audioinput");
-        const cameras = devices.filter((device) => device.kind === "videoinput");
-        const outputs = devices.filter((device) => device.kind === "audiooutput");
-        setAudioInputDevices(inputs);
-        setVideoInputDevices(cameras);
-        setAudioOutputDevices(outputs);
-
-        setSelectedAudioInputId((previous) => {
-          if (previous && inputs.some((device) => device.deviceId === previous)) {
-            return previous;
-          }
-          return inputs[0]?.deviceId || "";
-        });
-
-        setSelectedAudioOutputId((previous) => {
-          if (previous && outputs.some((device) => device.deviceId === previous)) {
-            return previous;
-          }
-          return outputs[0]?.deviceId || "";
-        });
-
-        setSelectedVideoInputId((previous) => {
-          if (previous && cameras.some((device) => device.deviceId === previous)) {
-            return previous;
-          }
-          return cameras[0]?.deviceId || "";
-        });
-
-        setDevicesError(null);
+        await refreshMediaDevices();
       } catch (error: any) {
         if (!isMounted) {
           return;
@@ -190,7 +235,7 @@ export default function Messages() {
       isMounted = false;
       navigator.mediaDevices.removeEventListener?.("devicechange", handleDeviceChange);
     };
-  }, []);
+  }, [refreshMediaDevices]);
 
   useEffect(() => {
     let isMounted = true;
@@ -428,7 +473,7 @@ export default function Messages() {
   }, [remoteStream]);
 
   useEffect(() => {
-    if (!selectedAudioOutputId || !remoteAudioRef.current) {
+    if (!speakerSelectionSupported || !selectedAudioOutputId || !remoteAudioRef.current) {
       return;
     }
 
@@ -443,7 +488,7 @@ export default function Messages() {
     audioElement.setSinkId(selectedAudioOutputId).catch((error: any) => {
       setDevicesError(error?.message || "Cannot switch audio output device.");
     });
-  }, [selectedAudioOutputId, remoteStream]);
+  }, [selectedAudioOutputId, remoteStream, speakerSelectionSupported]);
 
   const handleSendMessage = async (message: string) => {
     if (!message.trim()) return;
@@ -594,6 +639,19 @@ export default function Messages() {
               </div>
 
               <div className="px-4 py-2 border-b border-border bg-card/60 flex flex-wrap items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={requestMediaPermission}
+                  disabled={isRequestingMediaPermission}
+                >
+                  {isRequestingMediaPermission
+                    ? "Requesting access..."
+                    : hasMediaPermission
+                    ? "Refresh devices"
+                    : "Enable camera/mic access"}
+                </Button>
+
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">Microphone</span>
                   <select
@@ -632,6 +690,7 @@ export default function Messages() {
                     className="h-8 max-w-56 rounded-md border border-input bg-background px-2 text-xs"
                     value={selectedAudioOutputId}
                     onChange={(event) => setSelectedAudioOutputId(event.target.value)}
+                    disabled={!speakerSelectionSupported}
                   >
                     {audioOutputDevices.length === 0 && <option value="">Default</option>}
                     {audioOutputDevices.map((device, index) => (
@@ -641,6 +700,12 @@ export default function Messages() {
                     ))}
                   </select>
                 </div>
+
+                {!speakerSelectionSupported && (
+                  <span className="text-xs text-muted-foreground">
+                    Speaker selection is not supported in this browser.
+                  </span>
+                )}
               </div>
 
               <div className="px-4 py-2 text-xs text-muted-foreground border-b border-border">

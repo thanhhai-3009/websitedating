@@ -110,23 +110,37 @@ public class NotificationService {
     }
 
     public List<Notification> getUnreadNotifications(String clerkId) {
-        User user = userRepository.findByClerkId(clerkId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
-        return notificationRepository.findByUserIdAndIsReadFalseOrderByCreatedAtDesc(user.getId());
+        if (clerkId == null || clerkId.isBlank()) {
+            return List.of();
+        }
+
+        return userRepository.findByClerkId(clerkId)
+                .map(user -> notificationRepository.findByUserIdAndIsReadFalseOrderByCreatedAtDesc(user.getId()))
+                .orElse(List.of());
     }
 
     public List<Notification> getAllNotifications(String clerkId) {
-        User user = userRepository.findByClerkId(clerkId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
-        return notificationRepository.findByUserIdOrderByCreatedAtDesc(user.getId());
+        if (clerkId == null || clerkId.isBlank()) {
+            return List.of();
+        }
+
+        return userRepository.findByClerkId(clerkId)
+                .map(user -> notificationRepository.findByUserIdOrderByCreatedAtDesc(user.getId()))
+                .orElse(List.of());
     }
 
     public void markAsRead(String notificationId, String clerkId) {
         Notification notification = notificationRepository.findById(notificationId)
                 .orElseThrow(() -> new IllegalArgumentException("Notification not found"));
 
-        User user = userRepository.findByClerkId(clerkId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        if (clerkId == null || clerkId.isBlank()) {
+            return;
+        }
+
+        User user = userRepository.findByClerkId(clerkId).orElse(null);
+        if (user == null) {
+            return;
+        }
 
         if (!notification.getUserId().equals(user.getId())) {
             throw new IllegalArgumentException("Not authorized to modify this notification");
