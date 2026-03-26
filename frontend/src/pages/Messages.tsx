@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Search,
@@ -9,6 +9,9 @@ import {
   Verified,
   PhoneOff,
   Crown,
+  Mic,
+  MicOff,
+  RefreshCw,
 } from "lucide-react";
 import axios from "axios";
 import { useAuth } from "@clerk/clerk-react";
@@ -26,11 +29,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { resolveApiBaseUrl, toApiUrl } from "@/lib/runtimeApi";
 import { useChat } from "@/hooks/useChat";
 import { useWebRTC } from "@/hooks/useWebRTC";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const API_BASE_URL = resolveApiBaseUrl();
 
 interface MatchApiResponse {
   userId: string;
@@ -65,19 +69,6 @@ interface ResolvedUserResponse {
 
 const emojiList = ["😀", "😂", "😍", "🥰", "😎", "😅", "😘", "🥳", "❤️", "🔥", "🌹", "✨"];
 
-const toDisplayTime = (value?: string) => {
-  if (!value) {
-    return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-};
-
 const toDisplayTimestamp = (value?: string) => {
   if (!value) {
     return "Now";
@@ -99,8 +90,8 @@ const toDisplayTimestamp = (value?: string) => {
 const toAbsoluteMediaUrl = (url?: string) => {
   if (!url) return "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop";
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  if (url.startsWith("/")) return `${API_BASE_URL}${url}`;
-  return `${API_BASE_URL}/${url}`;
+  if (url.startsWith("/")) return API_BASE_URL ? `${API_BASE_URL}${url}` : url;
+  return API_BASE_URL ? `${API_BASE_URL}/${url}` : `/${url}`;
 };
 
 export default function Messages() {
@@ -108,9 +99,9 @@ export default function Messages() {
   const navigate = useNavigate();
   const preselectedConversationId = (location.state as { selectedConversationId?: string } | null)?.selectedConversationId;
   const { userId: clerkId, userId } = useAuth();
-  const { user: currentUser, isLoading: isCurrentUserLoading } = useCurrentUser();
-  const isPremiumUser = Boolean(currentUser?.premiumActive);
-  const isMessagesLocked = Boolean(clerkId) && !isCurrentUserLoading && !isPremiumUser;
+  const { user: currentUser } = useCurrentUser();
+  // Tam thoi mo khoa tinh nang messenger/video call de test MVP.
+  const isMessagesLocked = false;
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [draftMessage, setDraftMessage] = useState("");
@@ -118,6 +109,15 @@ export default function Messages() {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [isLoadingConversations, setIsLoadingConversations] = useState(false);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
+  const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [videoInputDevices, setVideoInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [audioOutputDevices, setAudioOutputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedAudioInputId, setSelectedAudioInputId] = useState("");
+  const [selectedVideoInputId, setSelectedVideoInputId] = useState("");
+  const [selectedAudioOutputId, setSelectedAudioOutputId] = useState("");
+  const [hasMediaPermission, setHasMediaPermission] = useState(false);
+  const [isRequestingMediaPermission, setIsRequestingMediaPermission] = useState(false);
+  const [devicesError, setDevicesError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -125,6 +125,120 @@ export default function Messages() {
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const localAudioRef = useRef<HTMLAudioElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const messagesViewportRef = useRef<HTMLDivElement | null>(null);
+  const hasAppliedPreselectedRef = useRef(false);
+
+  const speakerSelectionSupported = useMemo(() => {
+    if (typeof document === "undefined") {
+      return false;
+    }
+    const testAudio = document.createElement("audio") as HTMLAudioElement & {
+      setSinkId?: (deviceId: string) => Promise<void>;
+    };
+    return typeof testAudio.setSinkId === "function";
+  }, []);
+
+  const refreshMediaDevices = useCallback(async () => {
+    if (!navigator?.mediaDevices?.enumerateDevices) {
+      setDevicesError("Media device selection is not supported in this browser.");
+      return;
+    }
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inputs = devices.filter((device) => device.kind === "audioinput");
+    const cameras = devices.filter((device) => device.kind === "videoinput");
+    const outputs = devices.filter((device) => device.kind === "audiooutput");
+
+    setAudioInputDevices(inputs);
+    setVideoInputDevices(cameras);
+    setAudioOutputDevices(outputs);
+
+    setSelectedAudioInputId((previous) => {
+      if (previous && inputs.some((device) => device.deviceId === previous)) {
+        return previous;
+      }
+      return inputs[0]?.deviceId || "";
+    });
+
+    setSelectedVideoInputId((previous) => {
+      if (previous && cameras.some((device) => device.deviceId === previous)) {
+        return previous;
+      }
+      return cameras[0]?.deviceId || "";
+    });
+
+    setSelectedAudioOutputId((previous) => {
+      if (previous && outputs.some((device) => device.deviceId === previous)) {
+        return previous;
+      }
+      return outputs[0]?.deviceId || "";
+    });
+
+    const hasLabeledDevice = devices.some((device) => !!device.label);
+    if (hasLabeledDevice) {
+      setHasMediaPermission(true);
+    }
+    setDevicesError(null);
+  }, []);
+
+  const requestMediaPermission = useCallback(async () => {
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setDevicesError("Media permission is not supported in this browser.");
+      return;
+    }
+
+    setIsRequestingMediaPermission(true);
+    try {
+      const grantedStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: true,
+      });
+      grantedStream.getTracks().forEach((track) => track.stop());
+      setHasMediaPermission(true);
+      setDevicesError(null);
+      await refreshMediaDevices();
+    } catch (permissionError: any) {
+      setDevicesError(permissionError?.message || "Please allow camera and microphone access to select devices.");
+    } finally {
+      setIsRequestingMediaPermission(false);
+    }
+  }, [refreshMediaDevices]);
+
+  useEffect(() => {
+    hasAppliedPreselectedRef.current = false;
+  }, [preselectedConversationId]);
+
+  useEffect(() => {
+    if (!navigator?.mediaDevices?.enumerateDevices) {
+      setDevicesError("Media device selection is not supported in this browser.");
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    const loadDevices = async () => {
+      try {
+        await refreshMediaDevices();
+      } catch (error: any) {
+        if (!isMounted) {
+          return;
+        }
+        setDevicesError(error?.message || "Cannot enumerate media devices.");
+      }
+    };
+
+    loadDevices();
+
+    const handleDeviceChange = () => {
+      loadDevices();
+    };
+
+    navigator.mediaDevices.addEventListener?.("devicechange", handleDeviceChange);
+    return () => {
+      isMounted = false;
+      navigator.mediaDevices.removeEventListener?.("devicechange", handleDeviceChange);
+    };
+  }, [refreshMediaDevices]);
 
   useEffect(() => {
     let isMounted = true;
@@ -146,8 +260,13 @@ export default function Messages() {
       setConversationsError(null);
 
       try {
-         const matchesResponse = await axios.get<MatchApiResponse[]>(`${API_BASE_URL}/api/discovery/matches`, {
-           params: { clerkId },
+         const matchesResponse = await axios.get<MatchApiResponse[]>(toApiUrl("/api/discovery/matches"), {
+           params: {
+             clerkId,
+             // Hien ca like da nhan/da gui de co danh sach test chat ngay ca khi chua mutual match.
+             includeLiked: true,
+             includeSentLiked: true,
+           },
          });
 
         if (!isMounted) return;
@@ -169,26 +288,27 @@ export default function Messages() {
 
         setConversations(mappedConversations);
 
-        const hasPreselected =
-          preselectedConversationId
-          && mappedConversations.some(
-            (conversation) =>
-              conversation.id === preselectedConversationId
-              || conversation.userId === preselectedConversationId
-              || conversation.clerkId === preselectedConversationId
-          );
+        const preselectedMatch = preselectedConversationId
+          ? mappedConversations.find(
+              (conversation) =>
+                conversation.id === preselectedConversationId
+                || conversation.userId === preselectedConversationId
+                || conversation.clerkId === preselectedConversationId
+            )
+          : null;
 
-        if (hasPreselected) {
-          const matchedConversation = mappedConversations.find(
-            (conversation) =>
-              conversation.id === preselectedConversationId
-              || conversation.userId === preselectedConversationId
-              || conversation.clerkId === preselectedConversationId
-          );
-          setSelectedConversation(matchedConversation?.id || null);
-        } else if (!selectedConversation && mappedConversations.length > 0) {
-          setSelectedConversation(mappedConversations[0].id);
-        }
+        setSelectedConversation((previous) => {
+          if (preselectedMatch && !hasAppliedPreselectedRef.current) {
+            hasAppliedPreselectedRef.current = true;
+            return preselectedMatch.id;
+          }
+
+          if (previous && mappedConversations.some((conversation) => conversation.id === previous)) {
+            return previous;
+          }
+
+          return mappedConversations[0]?.id || null;
+        });
       } catch (loadError: any) {
         if (!isMounted) return;
         const message = loadError?.response?.data?.message || loadError?.message || "Cannot load matches from backend.";
@@ -210,7 +330,7 @@ export default function Messages() {
       isMounted = false;
       window.clearInterval(refreshId);
     };
-  }, [clerkId, isMessagesLocked, preselectedConversationId, selectedConversation]);
+  }, [clerkId, isMessagesLocked, preselectedConversationId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -220,7 +340,7 @@ export default function Messages() {
         return;
       }
       try {
-        const response = await axios.get<ResolvedUserResponse>(`${API_BASE_URL}/api/users/resolve/${encodeURIComponent(clerkId)}`);
+        const response = await axios.get<ResolvedUserResponse>(toApiUrl(`/api/users/resolve/${encodeURIComponent(clerkId)}`));
         if (!isMounted) return;
         setSelfDbUserId(response.data?.id || null);
       } catch {
@@ -235,7 +355,23 @@ export default function Messages() {
   }, [clerkId]);
 
   const selectedChat = conversations.find((c) => c.id === selectedConversation);
-  const roomId = selectedChat?.roomId || null;
+  const roomId = useMemo(() => {
+    if (!selectedChat) {
+      return null;
+    }
+
+    if (selectedChat.roomId) {
+      return selectedChat.roomId;
+    }
+
+    // Fallback for old match records without roomId.
+    if (selfDbUserId && selectedChat.userId) {
+      return `dm-${[selfDbUserId, selectedChat.userId].sort().join("-")}`;
+    }
+
+    return null;
+  }, [selectedChat, selfDbUserId]);
+
   const effectiveRoomId = isMessagesLocked ? null : roomId;
   const roomDerivedDbUserId = useMemo(() => {
     if (!roomId || !selectedChat?.userId || !roomId.startsWith("dm-")) {
@@ -260,7 +396,19 @@ export default function Messages() {
   const mappedLiveMessages = useMemo(() => {
     return (liveMessages || []).map((msg: any, index: number) => {
       const isImage = msg?.type === "IMAGE";
-      const mine = msg?.senderId ? msg.senderId === currentDbUserId || msg.senderId === userId : false;
+      const senderId = typeof msg?.senderId === "string" ? msg.senderId : "";
+
+      const mineCandidates = [currentDbUserId, selfDbUserId, clerkId, userId].filter(
+        (value): value is string => Boolean(value)
+      );
+
+      let mine = senderId ? mineCandidates.includes(senderId) : false;
+
+      // Defensive fallback for DM rooms when sender format differs across environments.
+      if (!mine && senderId && selectedChat?.userId) {
+        mine = senderId !== selectedChat.userId;
+      }
+
       return {
         id: msg?.id || `${msg?.timestamp || "msg"}-${index}`,
         message: isImage ? "" : msg?.content || "",
@@ -270,7 +418,15 @@ export default function Messages() {
         status: mine ? ("sent" as const) : undefined,
       };
     });
-  }, [currentDbUserId, liveMessages, userId]);
+  }, [clerkId, currentDbUserId, liveMessages, selectedChat?.userId, selfDbUserId, userId]);
+
+  const mediaPreferences = useMemo(
+    () => ({
+      audioInputDeviceId: selectedAudioInputId || null,
+      videoInputDeviceId: selectedVideoInputId || null,
+    }),
+    [selectedAudioInputId, selectedVideoInputId]
+  );
 
   const {
     isInCall,
@@ -279,39 +435,112 @@ export default function Messages() {
     incomingCall,
     localStream,
     remoteStream,
+    isMuted,
     startAudioCall,
     startVideoCall,
     acceptIncomingCall,
     rejectIncomingCall,
     endCall,
-  } = useWebRTC(effectiveRoomId, clerkId);
+    toggleMute,
+    flipCamera,
+  } = useWebRTC(effectiveRoomId, clerkId, mediaPreferences);
 
   const callTargetId = selectedChat?.clerkId || null;
+  const callDisplayHost = useMemo(() => {
+    if (typeof window === "undefined") {
+      return "trycloudflare.com";
+    }
+    return window.location.host;
+  }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (!messagesViewportRef.current) {
+      return;
+    }
+
+    // Keep latest message visible when opening room and when new messages arrive.
+    const viewport = messagesViewportRef.current;
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
   }, [mappedLiveMessages.length, selectedConversation]);
 
   useEffect(() => {
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = localStream || null;
-      localVideoRef.current.play().catch(() => {});
+    if (!localVideoRef.current) {
+      return;
     }
+
+    const video = localVideoRef.current;
+    video.srcObject = localStream || null;
+    video.muted = true;
+
+    const tryPlay = () => {
+      video.play().catch(() => {});
+    };
+
+    if (localStream && isInCall) {
+      video.addEventListener("loadedmetadata", tryPlay);
+      video.addEventListener("canplay", tryPlay);
+      tryPlay();
+    }
+
+    return () => {
+      video.removeEventListener("loadedmetadata", tryPlay);
+      video.removeEventListener("canplay", tryPlay);
+    };
+  }, [isInCall, localStream]);
+
+  useEffect(() => {
+    if (!remoteVideoRef.current) {
+      return;
+    }
+
+    const video = remoteVideoRef.current;
+    video.srcObject = remoteStream || null;
+
+    const tryPlay = () => {
+      video.play().catch(() => {});
+    };
+
+    if (remoteStream && isInCall) {
+      video.addEventListener("loadedmetadata", tryPlay);
+      video.addEventListener("canplay", tryPlay);
+      tryPlay();
+    }
+
+    return () => {
+      video.removeEventListener("loadedmetadata", tryPlay);
+      video.removeEventListener("canplay", tryPlay);
+    };
+  }, [isInCall, remoteStream]);
+
+  useEffect(() => {
     if (localAudioRef.current) {
       localAudioRef.current.srcObject = localStream || null;
     }
-  }, [localStream]);
+  }, [isInCall, localStream]);
 
   useEffect(() => {
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = remoteStream || null;
-      remoteVideoRef.current.play().catch(() => {});
-    }
     if (remoteAudioRef.current) {
       remoteAudioRef.current.srcObject = remoteStream || null;
-      remoteAudioRef.current.play().catch(() => {});
     }
-  }, [remoteStream]);
+  }, [isInCall, remoteStream]);
+
+  useEffect(() => {
+    if (!speakerSelectionSupported || !selectedAudioOutputId || !remoteAudioRef.current) {
+      return;
+    }
+
+    const audioElement = remoteAudioRef.current as HTMLAudioElement & {
+      setSinkId?: (deviceId: string) => Promise<void>;
+    };
+
+    if (typeof audioElement.setSinkId !== "function") {
+      return;
+    }
+
+    audioElement.setSinkId(selectedAudioOutputId).catch((error: any) => {
+      setDevicesError(error?.message || "Cannot switch audio output device.");
+    });
+  }, [selectedAudioOutputId, remoteStream, speakerSelectionSupported]);
 
   const handleSendMessage = async (message: string) => {
     if (!message.trim()) return;
@@ -449,10 +678,30 @@ export default function Messages() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" onClick={() => startAudioCall(callTargetId)}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      if (!callTargetId) {
+                        return;
+                      }
+                      startAudioCall(callTargetId);
+                    }}
+                    disabled={!callTargetId}
+                  >
                     <Phone className="w-5 h-5" />
                   </Button>
-                  <Button variant="ghost" size="icon" onClick={() => startVideoCall(callTargetId)}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      if (!callTargetId) {
+                        return;
+                      }
+                      startVideoCall(callTargetId);
+                    }}
+                    disabled={!callTargetId}
+                  >
                     <Video className="w-5 h-5" />
                   </Button>
                   <Button variant="ghost" size="icon">
@@ -461,15 +710,86 @@ export default function Messages() {
                 </div>
               </div>
 
+              <div className="px-4 py-2 border-b border-border bg-card/60 flex flex-wrap items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={requestMediaPermission}
+                  disabled={isRequestingMediaPermission}
+                >
+                  {isRequestingMediaPermission
+                    ? "Requesting access..."
+                    : hasMediaPermission
+                    ? "Refresh devices"
+                    : "Enable camera/mic access"}
+                </Button>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Microphone</span>
+                  <select
+                    className="h-8 max-w-56 rounded-md border border-input bg-background px-2 text-xs"
+                    value={selectedAudioInputId}
+                    onChange={(event) => setSelectedAudioInputId(event.target.value)}
+                  >
+                    {audioInputDevices.length === 0 && <option value="">Default</option>}
+                    {audioInputDevices.map((device, index) => (
+                      <option key={device.deviceId || `input-${index}`} value={device.deviceId}>
+                        {device.label || `Microphone ${index + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Camera</span>
+                  <select
+                    className="h-8 max-w-56 rounded-md border border-input bg-background px-2 text-xs"
+                    value={selectedVideoInputId}
+                    onChange={(event) => setSelectedVideoInputId(event.target.value)}
+                  >
+                    {videoInputDevices.length === 0 && <option value="">Default</option>}
+                    {videoInputDevices.map((device, index) => (
+                      <option key={device.deviceId || `video-${index}`} value={device.deviceId}>
+                        {device.label || `Camera ${index + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Speaker</span>
+                  <select
+                    className="h-8 max-w-56 rounded-md border border-input bg-background px-2 text-xs"
+                    value={selectedAudioOutputId}
+                    onChange={(event) => setSelectedAudioOutputId(event.target.value)}
+                    disabled={!speakerSelectionSupported}
+                  >
+                    {audioOutputDevices.length === 0 && <option value="">Default</option>}
+                    {audioOutputDevices.map((device, index) => (
+                      <option key={device.deviceId || `output-${index}`} value={device.deviceId}>
+                        {device.label || `Speaker ${index + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {!speakerSelectionSupported && (
+                  <span className="text-xs text-muted-foreground">
+                    Speaker selection is not supported in this browser.
+                  </span>
+                )}
+              </div>
+
               <div className="px-4 py-2 text-xs text-muted-foreground border-b border-border">
                 {isConnected ? "Chat connected" : "Connecting chat..."}
                 {roomId ? ` | room: ${roomId}` : ""}
                 {conversationsError ? ` | ${conversationsError}` : ""}
                 {error ? ` | ${error}` : ""}
                 {callError ? ` | ${callError}` : ""}
+                {devicesError ? ` | ${devicesError}` : ""}
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div ref={messagesViewportRef} className="flex-1 overflow-y-auto p-4 space-y-4">
                 {mappedLiveMessages.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No messages yet. Send the first message.</p>
                 ) : (
@@ -483,7 +803,8 @@ export default function Messages() {
                       status={msg.status}
                     />
                   ))
-                )}
+                )
+                }
                 <div ref={messagesEndRef} />
               </div>
 
@@ -506,62 +827,135 @@ export default function Messages() {
               />
 
               <Dialog open={isInCall}>
-                <DialogContent className="max-w-3xl">
+                <DialogContent className="max-w-md border-0 bg-transparent p-0 shadow-none">
                   <DialogHeader>
                     <DialogTitle>{callMode === "audio" ? "Audio call" : "Video call"}</DialogTitle>
                     <DialogDescription>
-                      {selectedChat.user.name} - press end call to stop.
+                      {selectedChat?.user.name} - press end call to stop.
                     </DialogDescription>
                   </DialogHeader>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="rounded-lg bg-secondary/60 p-2">
-                      <p className="text-xs text-muted-foreground mb-2">You</p>
-                      {callMode === "video" ? (
-                        <video ref={localVideoRef} autoPlay muted playsInline className="w-full rounded-md bg-black min-h-48" />
-                      ) : (
-                        <div className="w-full min-h-48 rounded-md bg-black/80 flex items-center justify-center text-white text-sm">
-                          Audio only
-                         </div>
-                      )}
-                      <audio ref={localAudioRef} autoPlay muted className="hidden" />
-                    </div>
-                    <div className="rounded-lg bg-secondary/60 p-2">
-                      <p className="text-xs text-muted-foreground mb-2">{selectedChat.user.name}</p>
-                      {callMode === "video" ? (
-                        <video ref={remoteVideoRef} autoPlay playsInline className="w-full rounded-md bg-black min-h-48" />
-                      ) : (
-                        <div className="w-full min-h-48 rounded-md bg-black/80 flex items-center justify-center text-white text-sm">
-                          Connecting audio...
+                  <div className="relative mx-auto w-full max-w-[390px] overflow-hidden rounded-[34px] border border-white/20 bg-black/70 p-3 shadow-2xl backdrop-blur">
+                    <div className="rounded-[26px] bg-black/60 p-3">
+                      <div className="mb-2 flex items-center justify-between px-1 text-[11px] text-white/80">
+                        <span>15:06</span>
+                        <span className="max-w-[230px] truncate">{callDisplayHost}</span>
+                      </div>
+
+                      <div className="mb-2 rounded-2xl bg-black/70 px-3 py-2 text-white">
+                        <p className="text-sm font-semibold">Video call</p>
+                        <p className="text-xs text-white/80">{selectedChat?.user.name} - press end call to stop.</p>
+                      </div>
+
+                      <div className="space-y-3 pb-24">
+                        <div className="relative h-[240px] overflow-hidden rounded-2xl bg-neutral-900">
+                          {callMode === "video" ? (
+                            <video
+                              ref={(node) => {
+                                localVideoRef.current = node;
+                                if (node) {
+                                  node.srcObject = localStream || null;
+                                  node.muted = true;
+                                  if (localStream) {
+                                    node.play().catch(() => {});
+                                  }
+                                }
+                              }}
+                              autoPlay
+                              muted
+                              playsInline
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-sm text-white/80">Audio only</div>
+                          )}
+                          <div className="absolute left-3 top-3 rounded-full bg-black/55 px-3 py-1 text-xs text-white">
+                            You - {currentUser?.username || "User"}
+                          </div>
                         </div>
-                      )}
-                      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
+
+                        <div className="relative h-[240px] overflow-hidden rounded-2xl bg-neutral-900">
+                          {callMode === "video" ? (
+                            <video
+                              ref={(node) => {
+                                remoteVideoRef.current = node;
+                                if (node) {
+                                  node.srcObject = remoteStream || null;
+                                  if (remoteStream) {
+                                    node.play().catch(() => {});
+                                  }
+                                }
+                              }}
+                              autoPlay
+                              playsInline
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-sm text-white/80">Connecting audio...</div>
+                          )}
+                          <div className="absolute left-3 top-3 rounded-full bg-black/55 px-3 py-1 text-xs text-white">
+                            {selectedChat?.user.name}
+                          </div>
+                        </div>
+                      </div>
+
+                      <audio ref={localAudioRef} autoPlay muted playsInline style={{ display: "none" }} />
+                      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} />
+                    </div>
+
+                    <div className="absolute inset-x-4 bottom-4 rounded-2xl border border-white/20 bg-black/45 p-3 backdrop-blur-md">
+                      <div className="flex items-center justify-center gap-3">
+                        <button
+                          type="button"
+                          onClick={toggleMute}
+                          className="flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25"
+                          aria-label="Mute microphone"
+                        >
+                          {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (callMode === "video") {
+                              flipCamera();
+                            }
+                          }}
+                          className="flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25"
+                          aria-label="Flip camera"
+                          disabled={callMode !== "video"}
+                        >
+                          <RefreshCw className="h-5 w-5" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={endCall}
+                          className="inline-flex h-11 items-center gap-2 rounded-full bg-red-600 px-4 text-white transition hover:bg-red-500"
+                        >
+                          <PhoneOff className="h-4 w-4" />
+                          <span className="text-sm font-medium">End call</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
-
-                  <div className="flex justify-center">
-                    <Button variant="destructive" onClick={endCall} className="gap-2">
-                      <PhoneOff className="w-4 h-4" />
-                      End call
-                    </Button>
-                  </div>
                 </DialogContent>
               </Dialog>
 
-              <Dialog open={Boolean(incomingCall) && !isInCall}>
-                <DialogContent className="max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>Incoming {incomingCall?.mode === "audio" ? "audio" : "video"} call</DialogTitle>
-                    <DialogDescription>
-                      {selectedChat.user.name} is calling you.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="flex items-center justify-center gap-3">
-                    <Button variant="outline" onClick={rejectIncomingCall}>Reject</Button>
-                    <Button variant="gradient" onClick={acceptIncomingCall}>Accept</Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
+               <Dialog open={Boolean(incomingCall) && !isInCall}>
+                 <DialogContent className="max-w-md">
+                   <DialogHeader>
+                     <DialogTitle>Incoming {incomingCall?.mode === "audio" ? "audio" : "video"} call</DialogTitle>
+                     <DialogDescription>
+                       {selectedChat.user.name} is calling you.
+                     </DialogDescription>
+                   </DialogHeader>
+                   <div className="flex items-center justify-center gap-3">
+                     <Button variant="outline" onClick={rejectIncomingCall}>Reject</Button>
+                     <Button variant="gradient" onClick={acceptIncomingCall}>Accept</Button>
+                   </div>
+                 </DialogContent>
+               </Dialog>
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -596,7 +990,7 @@ export default function Messages() {
           </div>
         )}
 
-        {Boolean(clerkId) && isCurrentUserLoading && (
+        {Boolean(clerkId) && !currentUser && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
             <p className="text-sm text-muted-foreground">Checking premium access...</p>
           </div>

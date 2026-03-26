@@ -111,7 +111,7 @@ public class DiscoveryService {
                 .filter(candidate -> !candidate.getId().equals(me.getId()))
                 .filter(candidate -> !excludedIds.contains(candidate.getId()))
                 .filter(candidate -> allowGeoDiscovery(candidate.getSettings()))
-                .filter(candidate -> matchesPreference(me, candidate) && matchesPreference(candidate, me))
+                .filter(candidate -> matchesPreference(me, candidate))
                 .map(candidate -> toResponse(me, candidate, null))
                 .sorted(Comparator.comparing(DiscoverUserResponse::getDistanceKm, Comparator.nullsLast(Double::compareTo)))
                 .limit(effectiveLimit)
@@ -371,18 +371,29 @@ public class DiscoveryService {
         GeoJsonPoint myLocation = extractPoint(me);
         Set<String> excludedIds = excludedUserIds(me.getId());
 
-        List<User> byGeo;
+        List<User> candidatePool = new ArrayList<>();
         if (myLocation != null) {
-            byGeo = nearbyCandidates(myLocation, Math.max(defaultRadius(me), 120), Math.min(maxCandidates * 2, 500));
-        } else {
-            byGeo = userRepository.findAll();
+            candidatePool.addAll(nearbyCandidates(myLocation, Math.max(defaultRadius(me), 220), Math.min(maxCandidates * 3, 800)));
         }
 
-        return byGeo.stream()
+        // Backfill from global users so recommendations remain populated even when local/radius data is sparse.
+        if (candidatePool.size() < maxCandidates * 2) {
+            candidatePool.addAll(userRepository.findAll());
+        }
+
+        LinkedHashMap<String, User> uniquePool = new LinkedHashMap<>();
+        for (User candidate : candidatePool) {
+            if (candidate == null || candidate.getId() == null) {
+                continue;
+            }
+            uniquePool.putIfAbsent(candidate.getId(), candidate);
+        }
+
+        return uniquePool.values().stream()
                 .filter(candidate -> !candidate.getId().equals(me.getId()))
                 .filter(candidate -> !excludedIds.contains(candidate.getId()))
                 .filter(candidate -> allowGeoDiscovery(candidate.getSettings()))
-                .filter(candidate -> matchesPreference(me, candidate) && matchesPreference(candidate, me))
+                .filter(candidate -> matchesPreference(me, candidate))
                 .limit(maxCandidates)
                 .toList();
     }
@@ -410,7 +421,7 @@ public class DiscoveryService {
             reasonTags.add(ReasonTag.similar_behavior);
         }
         if (reasonTags.isEmpty()) {
-            reasonTags.add(ReasonTag.profile_similarity);
+            reasonTags.add(ReasonTag.recommended);
         }
 
         return new ScoredCandidate(candidate, round(finalScore), reasonTags);
@@ -446,7 +457,10 @@ public class DiscoveryService {
     }
 
     private double preferenceFitScore(User me, User candidate) {
-        return matchesPreference(me, candidate) && matchesPreference(candidate, me) ? 1d : 0.2d;
+        if (!matchesPreference(me, candidate)) {
+            return 0.05d;
+        }
+        return matchesPreference(candidate, me) ? 1d : 0.65d;
     }
 
     private double distanceScore(User me, User candidate) {

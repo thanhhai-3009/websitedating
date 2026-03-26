@@ -25,5 +25,5 @@ public class CommonEnums {
     public enum ReportCategory { spam, harassment, fake_profile, scam, inappropriate_content, underage_user, other }
     public enum ReportStatus { pending, resolved, dismissed, reviewed }
 
-    public enum ReasonTag { same_interest, nearby, similar_behavior, mutual_connection, profile_similarity }
+    public enum ReasonTag { same_interest, nearby, similar_behavior, mutual_connection, profile_similarity, recommended }
 }

@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -22,6 +23,7 @@ import DateReview from "./pages/DateReview";
 import AdminUsers from "./pages/AdminUsers";
 import AdminReports from "./pages/AdminReports";
 import BlockedUsers from "./pages/BlockedUsers";
+import ManagerRevenue from "./pages/ManagerRevenue";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -37,6 +39,16 @@ function RootRoute() {
   const { isSignedIn, isLoaded } = useAuth();
   if (!isLoaded) return null;
   return isSignedIn ? <Navigate to="/discover" replace /> : <Landing />;
+}
+
+function ManagerRoute({ children }: { children: React.ReactNode }) {
+  const { isSignedIn, isLoaded } = useAuth();
+  const { isLoading, isManager } = useCurrentUser();
+
+  if (!isLoaded || isLoading) return null;
+  if (!isSignedIn) return <Navigate to="/login" replace />;
+  if (!isManager) return <Navigate to="/discover" replace />;
+  return <>{children}</>;
 }
 
 const App = () => (
@@ -62,7 +74,9 @@ const App = () => (
           <Route path="/appointments" element={<ProtectedRoute><Appointments /></ProtectedRoute>} />
           <Route path="/review/:id" element={<ProtectedRoute><DateReview /></ProtectedRoute>} />
           <Route path="/admin" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
+          <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
           <Route path="/admin/reports" element={<ProtectedRoute><AdminReports /></ProtectedRoute>} />
+          <Route path="/manager/revenue" element={<ManagerRoute><ManagerRevenue /></ManagerRoute>} />
           <Route path="/blocked" element={<ProtectedRoute><BlockedUsers /></ProtectedRoute>} />
           <Route path="*" element={<ProtectedRoute><NotFound /></ProtectedRoute>} />
         </Routes>

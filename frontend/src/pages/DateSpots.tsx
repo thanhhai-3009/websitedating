@@ -5,8 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { MapPin, Star, DollarSign, Clock, Heart, Search, Filter, Coffee, UtensilsCrossed, Wine, TreePine, Music, Palette } from "lucide-react";
+import { MapPin, Star, DollarSign, Clock, Heart, Search, Filter, Crown } from "lucide-react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@clerk/clerk-react";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { cn } from "@/lib/utils";
 
 import { spots } from "@/lib/dateSpots";
 
@@ -17,6 +21,12 @@ const costColors: Record<string, string> = {
 };
 
 const DateSpots = () => {
+  const navigate = useNavigate();
+  const { userId: clerkId } = useAuth();
+  const { user: currentUser, isLoading: isCurrentUserLoading } = useCurrentUser();
+  const isPremiumUser = Boolean(currentUser?.premiumActive);
+  const isDateSpotsLocked = Boolean(clerkId) && !isCurrentUserLoading && !isPremiumUser;
+
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
   const [favorites, setFavorites] = useState<number[]>(spots.filter(s => s.liked).map(s => s.id));
@@ -33,7 +43,8 @@ const DateSpots = () => {
 
   return (
     <Layout isAuthenticated>
-      <div className="container mx-auto px-4 py-8">
+      <div className="relative">
+        <div className={cn("container mx-auto px-4 py-8", isDateSpotsLocked && "blur-sm pointer-events-none select-none")}>
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
           <h1 className="text-3xl md:text-4xl font-serif font-bold text-foreground mb-2">Date Spot Suggestions</h1>
@@ -134,6 +145,30 @@ const DateSpots = () => {
             <MapPin className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
             <h3 className="font-serif text-xl text-foreground mb-2">No spots found</h3>
             <p className="text-muted-foreground">Try adjusting your search or filters</p>
+          </div>
+        )}
+        </div>
+
+        {isDateSpotsLocked && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/50 backdrop-blur-[2px] px-4">
+            <div className="max-w-md w-full rounded-2xl border border-border bg-card/95 p-6 text-center shadow-xl">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gold text-white">
+                <Crown className="h-6 w-6" />
+              </div>
+              <h2 className="text-xl font-semibold text-foreground">Premium required for Date Spots</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Upgrade to Premium to unlock date spot suggestions and booking access.
+              </p>
+              <Button className="mt-5" variant="gradient" onClick={() => navigate("/premium")}>
+                Upgrade to Premium
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {Boolean(clerkId) && isCurrentUserLoading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
+            <p className="text-sm text-muted-foreground">Checking premium access...</p>
           </div>
         )}
       </div>

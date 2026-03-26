@@ -7,12 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { CalendarDays, Clock, MapPin, MessageCircle, Star, Trash2, Edit, Plus } from "lucide-react";
+import { CalendarDays, Clock, MapPin, MessageCircle, Star, Trash2, Edit, Plus, Crown } from "lucide-react";
 import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { useUser, useAuth } from "@clerk/clerk-react";
 import { getApiToken } from "@/lib/clerkToken";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { cn } from "@/lib/utils";
 
 interface Appointment {
   id: string;
@@ -44,11 +46,12 @@ interface ResolvedUserResponse {
 
 // will be fetched from API
 
-const statusConfig: Record<string, { label: string; className: string }> = {
+const statusConfig: Record<Appointment["status"], { label: string; className: string }> = {
   confirmed: { label: "Confirmed", className: "bg-success/10 text-success border-success/20" },
   pending: { label: "Pending", className: "bg-accent/10 text-accent border-accent/20" },
   completed: { label: "Completed", className: "bg-primary/10 text-primary border-primary/20" },
   cancelled: { label: "Cancelled", className: "bg-destructive/10 text-destructive border-destructive/20" },
+  incomplete: { label: "Incomplete", className: "bg-muted text-muted-foreground border-border" },
 };
 
 const Appointments = () => {
@@ -58,12 +61,16 @@ const Appointments = () => {
   const [matchedUsers, setMatchedUsers] = useState<Array<any>>([]);
   const [editAptRaw, setEditAptRaw] = useState<any | null>(null);
   const [editParticipantName, setEditParticipantName] = useState<string | null>(null);
+  const [editCreatorName, setEditCreatorName] = useState<string | null>(null);
   const [editUiStatus, setEditUiStatus] = useState<string>("pending");
   const [selfDbUserId, setSelfDbUserId] = useState<string | null>(null);
   const [reviewsByAppointmentId, setReviewsByAppointmentId] = useState<Record<string, DateReviewSummary>>({});
   const { toast } = useToast();
   const { user } = useUser();
   const { getToken } = useAuth();
+  const { user: currentUser, isLoading: isCurrentUserLoading } = useCurrentUser();
+  const isPremiumUser = Boolean(currentUser?.premiumActive);
+  const isAppointmentsLocked = Boolean(user?.id) && !isCurrentUserLoading && !isPremiumUser;
 
   useEffect(() => {
     let cancelled = false;
@@ -161,7 +168,7 @@ const Appointments = () => {
       }
 
       // normalize server shape to UI shape
-      const mapBackendToUI = (s: any) => {
+      const mapBackendToUI = (s: any): Appointment["status"] => {
         if (!s) return 'pending';
         const st = String(s).toLowerCase();
         switch (st) {
@@ -176,26 +183,76 @@ const Appointments = () => {
             return 'completed';
           case 'pending':
           case 'confirmed':
-            return st;
+          case 'incomplete':
+            return st as Appointment["status"];
           default:
-            return st;
+            return 'pending';
         }
       };
 
       const matchLookup = new Map<string, string>();
       (mdata || []).forEach((m: any) => {
-        const id = m.userId ?? m.clerkId ?? m.id ?? null;
-        if (id) matchLookup.set(String(id), m.displayName || m.username || m.name || String(id));
+        const raw = m.displayName || m.username || m.name || "Match";
+        const displayName = (raw && raw.normalize) ? raw.normalize('NFC') : raw;
+        const keys = [m.clerkId, m.userId, m.id].filter(Boolean).map((k: any) => String(k));
+        keys.forEach((k: string) => matchLookup.set(k, displayName));
       });
 
-      const mapped = (data || []).map((it: any) => {
+      const appointmentList = Array.isArray(data) ? data : [];
+      // resolve both participant and creator ids that are not present in matchLookup
+      const idsToResolve = Array.from(
+        new Set(appointmentList
+          .flatMap((it: any) => [it?.participantId ? String(it.participantId) : "", it?.creatorId ? String(it.creatorId) : ""]) 
+          .filter((id: string) => !!id && !matchLookup.has(id))
+        )
+      );
+
+      if (idsToResolve.length > 0) {
+        const resolved = await Promise.all(
+          idsToResolve.map(async (clerkIdToResolve: string) => {
+            try {
+              const r = await fetch(`/api/users/resolve/${encodeURIComponent(clerkIdToResolve)}`);
+              if (!r.ok) return null;
+              const u = await r.json();
+              const name = u?.username || clerkIdToResolve;
+              return {
+                clerkId: String(u?.clerkId || clerkIdToResolve),
+                userId: u?.id ? String(u.id) : null,
+                name,
+              };
+            } catch {
+              return null;
+            }
+          }),
+        );
+
+        resolved.filter(Boolean).forEach((u: any) => {
+          matchLookup.set(u.clerkId, u.name);
+          if (u.userId) matchLookup.set(u.userId, u.name);
+        });
+      }
+
+      const mapped = appointmentList.map((it: any) => {
         const scheduled = it.scheduledTime ? new Date(it.scheduledTime) : null;
         const rawParticipantId = it.participantId ? String(it.participantId) : "";
-        const resolvedName = matchLookup.get(rawParticipantId) || rawParticipantId || "Match";
-        const initials = resolvedName.split(" ").map((s: string) => s[0]).slice(0,2).join("") || (resolvedName.substring(0,2) || "M");
+        const rawCreatorId = it.creatorId ? String(it.creatorId) : "";
+        const participantName = matchLookup.get(rawParticipantId) || (rawParticipantId ? rawParticipantId : null) || "Match";
+        const creatorName = matchLookup.get(rawCreatorId) || (rawCreatorId ? rawCreatorId : null) || null;
+        const displayNameCombined = creatorName ? `${creatorName} & ${participantName}` : participantName;
+        const normalizeStr = (str: string) => (str && str.normalize) ? str.normalize('NFC') : str;
+        const firstGrapheme = (str: string) => {
+          const s = normalizeStr(str || '');
+          try {
+            const arr = Array.from(s);
+            return arr.length ? arr[0] : '';
+          } catch {
+            return s.charAt(0) || '';
+          }
+        };
+        const initials = (participantName.split(" ").map((s: string) => firstGrapheme(s)).slice(0,2).join("") || (participantName.substring(0,2) || "M")).toUpperCase();
         return {
           id: it.id || it._id || "",
-          matchName: resolvedName,
+          matchName: displayNameCombined,
           matchInitials: initials || "M",
           spot: it.location?.placeName || "",
           location: it.location?.address || "",
@@ -204,6 +261,8 @@ const Appointments = () => {
           status: mapBackendToUI(it.status),
           creatorId: it.creatorId || null,
           participantId: it.participantId || null,
+          creatorName: creatorName,
+          participantName: participantName,
           scheduledISO: it.scheduledTime || null,
           creatorContinued: !!it.creatorContinued,
           participantContinued: !!it.participantContinued,
@@ -213,6 +272,14 @@ const Appointments = () => {
 
       setAppointments(mapped);
 
+      // debug: log loaded appointments statuses to help troubleshoot missing cancelled items
+      try {
+        // eslint-disable-next-line no-console
+        console.debug('Appointments loaded (mapped):', mapped.map(m => ({ id: m.id, status: m.status, scheduledISO: m.scheduledISO })));
+      } catch (e) {
+        // ignore
+      }
+
       const completedIds = mapped.filter((value) => value.status === "completed").map((value) => value.id);
       await loadMyReviews(completedIds);
     } catch (err) {
@@ -221,7 +288,25 @@ const Appointments = () => {
   };
 
   useEffect(() => {
+    if (isAppointmentsLocked) {
+      setAppointments([]);
+      setReviewsByAppointmentId({});
+      return;
+    }
     fetchAppointments();
+  }, [user, selfDbUserId, isAppointmentsLocked]);
+
+  // listen for realtime appointment updates (fired by notifications) and refresh
+  useEffect(() => {
+    const handler = (e: any) => {
+      try {
+        fetchAppointments();
+      } catch (err) {
+        console.error('Error refreshing appointments after update event', err);
+      }
+    };
+    window.addEventListener('appointment-updated', handler as EventListener);
+    return () => window.removeEventListener('appointment-updated', handler as EventListener);
   }, [user, selfDbUserId]);
 
   const now = new Date();
@@ -234,13 +319,36 @@ const Appointments = () => {
   // - otherwise confirmed/pending -> upcoming
   const upcoming = appointments.filter(a => {
     const sched = parseISO(a.scheduledISO);
-    if (!sched) return a.status === 'confirmed' || a.status === 'pending';
-    if (a.status === 'pending' && now > sched) return false; // move to past
+    if (!sched) return a.status === 'confirmed' || a.status === 'pending' || a.status === 'incomplete';
+    const end = addHours(sched, 2);
+    // pending where scheduledTime already passed -> past
+    if (a.status === 'pending' && now > sched) return false;
+    // treat incomplete as past
+    if (a.status === 'incomplete') return false;
+    // confirmed but appointment window ended -> past
+    if (a.status === 'confirmed' && end && now > end) return false;
     return a.status === 'confirmed' || a.status === 'pending' || a.status === 'incomplete';
   });
-  const past = appointments.filter(a => {
-    return a.status === 'completed' || a.status === 'cancelled' || (a.status === 'pending' && a.scheduledISO && now > new Date(a.scheduledISO));
-  });
+
+  const past = appointments
+    .filter(a => {
+      const sched = parseISO(a.scheduledISO);
+      const end = sched ? addHours(sched, 2) : null;
+      return (
+        a.status === 'completed' ||
+        a.status === 'incomplete' ||
+        a.status === 'cancelled' ||
+        a.status === 'canceled' ||
+        (a.status === 'pending' && sched && now > sched) ||
+        (a.status === 'confirmed' && end && now > end)
+      );
+    })
+    .sort((x, y) => {
+      const dx = x.scheduledISO ? new Date(x.scheduledISO).getTime() : 0;
+      const dy = y.scheduledISO ? new Date(y.scheduledISO).getTime() : 0;
+      if (dx === dy) return (y.id || '').localeCompare(x.id || '');
+      return dy - dx; // newest scheduled first
+    });
 
   const handleCancel = () => {
     if (!cancelId) return;
@@ -318,7 +426,7 @@ const Appointments = () => {
                         if (isCreator) data.creatorContinued = true;
                         if (isParticipant) data.participantContinued = true;
                         await fetch(`/api/appointments/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-                        toast({ title: 'Tiếp tục', description: 'Cảm ơn, chờ đối phương bấm tiếp tục.' });
+                        toast({ title: 'Continue', description: 'Thanks. Waiting for the other person to continue.' });
                         fetchAppointments();
                       } catch (e) {
                         console.error(e);
@@ -333,7 +441,7 @@ const Appointments = () => {
                         const data = await resGet.json();
                         data.status = 'completed';
                         await fetch(`/api/appointments/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-                        toast({ title: 'Hoàn thành', description: 'Cảm ơn bạn đã hoàn thành lịch hẹn.' });
+                        toast({ title: 'Completed', description: 'Thanks for completing the appointment.' });
                         fetchAppointments();
                       } catch (e) {
                         console.error(e);
@@ -345,9 +453,9 @@ const Appointments = () => {
                     if (apt.status === 'pending' && isParticipant) {
                       return (
                         <>
-                          <Button size="sm" variant="outline" className="gap-1" onClick={() => acceptAppointment(apt.id)}><Plus className="w-3.5 h-3.5" />Chấp nhận</Button>
+                          <Button size="sm" variant="outline" className="gap-1" onClick={() => acceptAppointment(apt.id)}><Plus className="w-3.5 h-3.5" />Accept</Button>
                           <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
-                            <Trash2 className="w-3.5 h-3.5" />Hủy
+                            <Trash2 className="w-3.5 h-3.5" />Cancel
                           </Button>
                         </>
                       );
@@ -357,32 +465,31 @@ const Appointments = () => {
                     if (apt.status === 'pending' && isCreator) {
                       return (
                         <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>
-                          <Trash2 className="w-3.5 h-3.5" />Hủy
+                          <Trash2 className="w-3.5 h-3.5" />Cancel
                         </Button>
                       );
                     }
 
-                    // At scheduled time both can 'Tiếp tục'
+                    // At scheduled time both can continue.
                     if (apt.status === 'confirmed') {
                       const start = sched;
                       const end = start ? addHours(start, 2) : null;
                       const userHasContinued = isCreator ? !!apt.creatorContinued : !!apt.participantContinued;
 
-                      if (start && now >= start && (!userHasContinued)) {
+                      // show Continue only while appointment window is active (start..end)
+                      if (start && now >= start && end && now <= end && (!userHasContinued)) {
                         return (
                           <>
-                            <Button size="sm" variant="outline" className="gap-1" onClick={() => sendContinue(apt.id)}>Tiếp tục</Button>
-                            <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>Hủy</Button>
+                            <Button size="sm" variant="outline" className="gap-1" onClick={() => sendContinue(apt.id)}>Continue</Button>
+                            <Button size="sm" variant="outline" className="gap-1 text-destructive hover:text-destructive" onClick={() => setCancelId(apt.id)}>Cancel</Button>
                           </>
                         );
                       }
 
-                      // if both continued and now after end -> show complete
-                      if (start && end && now > end && apt.creatorContinued && apt.participantContinued) {
+                      // when appointment window ended, allow either creator or participant to complete
+                      if (start && end && now > end && (isCreator || isParticipant)) {
                         return (
-                          <>
-                            <Button size="sm" variant="gradient" className="gap-1" onClick={() => completeAppointment(apt.id)}>Hoàn thành</Button>
-                          </>
+                          <Button size="sm" variant="gradient" className="gap-1" onClick={() => completeAppointment(apt.id)}>Complete</Button>
                         );
                       }
                     }
@@ -397,11 +504,54 @@ const Appointments = () => {
                             const data = await res.json();
                                 setEditAptRaw(data);
                                 const pid = data?.participantId ? String(data.participantId) : null;
+                                const cid = data?.creatorId ? String(data.creatorId) : null;
                                 if (pid) {
-                                  const found = (matchedUsers || []).find((m:any) => String(m.clerkId ?? m.userId ?? m.id) === pid);
-                                  setEditParticipantName(found ? (found.displayName || found.username || found.name) : pid);
+                                  const found = (matchedUsers || []).find((m:any) => {
+                                    const ids = [m.clerkId, m.userId, m.id].filter(Boolean).map((v:any) => String(v));
+                                    return ids.includes(pid);
+                                  });
+                                  if (found) {
+                                    setEditParticipantName(found.displayName || found.username || found.name || 'Match');
+                                  } else {
+                                    try {
+                                      const ures = await fetch(`/api/users/resolve/${encodeURIComponent(pid)}`);
+                                      if (ures.ok) {
+                                        const u = await ures.json();
+                                        setEditParticipantName(u?.username || u?.displayName || 'Match');
+                                      } else {
+                                        setEditParticipantName('Match');
+                                      }
+                                    } catch {
+                                      setEditParticipantName('Match');
+                                    }
+                                  }
                                 } else {
                                   setEditParticipantName(null);
+                                }
+                                if (cid) {
+                                  const foundC = (matchedUsers || []).find((m:any) => {
+                                    const ids = [m.clerkId, m.userId, m.id].filter(Boolean).map((v:any) => String(v));
+                                    return ids.includes(cid);
+                                  });
+                                  if (foundC) {
+                                    const n = (foundC.displayName || foundC.username || foundC.name || null);
+                                    setEditCreatorName(n && n.normalize ? n.normalize('NFC') : n);
+                                  } else {
+                                    try {
+                                      const cres = await fetch(`/api/users/resolve/${encodeURIComponent(cid)}`);
+                                      if (cres.ok) {
+                                        const cu = await cres.json();
+                                        const n = cu?.username || cu?.displayName || null;
+                                        setEditCreatorName(n && n.normalize ? n.normalize('NFC') : n);
+                                      } else {
+                                        setEditCreatorName(null);
+                                      }
+                                    } catch {
+                                      setEditCreatorName(null);
+                                    }
+                                  }
+                                } else {
+                                  setEditCreatorName(null);
                                 }
                             const ui = (s: any) => {
                               if (!s) return 'pending';
@@ -450,6 +600,8 @@ const Appointments = () => {
 
   return (
     <Layout isAuthenticated>
+      <div className="relative">
+      <div className={cn(isAppointmentsLocked && "blur-sm pointer-events-none select-none")}>
       <div className="container mx-auto px-4 py-8 max-w-3xl">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
           <div className="flex items-center justify-between mb-8">
@@ -517,7 +669,9 @@ const Appointments = () => {
           <div className="space-y-4 mt-2">
             <div>
               <label className="block text-sm text-muted-foreground mb-1">Match</label>
-              <div className="text-foreground">{editParticipantName || editAptRaw?.participant || editAptRaw?.participantId || '—'}</div>
+              <div className="text-foreground">
+                {(editCreatorName || editAptRaw?.creator || editAptRaw?.creatorId || '—') + ' — ' + (editParticipantName || editAptRaw?.participant || editAptRaw?.participantId || '—')}
+              </div>
             </div>
             <div>
               <label className="block text-sm text-muted-foreground mb-1">Place</label>
@@ -571,6 +725,31 @@ const Appointments = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </div>
+
+      {isAppointmentsLocked && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/50 backdrop-blur-[2px] px-4">
+          <div className="max-w-md w-full rounded-2xl border border-border bg-card/95 p-6 text-center shadow-xl">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gold text-white">
+              <Crown className="h-6 w-6" />
+            </div>
+            <h2 className="text-xl font-semibold text-foreground">Premium required for Appointments</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Upgrade to Premium to unlock appointment management and booking workflows.
+            </p>
+            <Button className="mt-5" variant="gradient" onClick={() => navigate("/premium")}>
+              Upgrade to Premium
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {Boolean(user?.id) && isCurrentUserLoading && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
+          <p className="text-sm text-muted-foreground">Checking premium access...</p>
+        </div>
+      )}
+      </div>
     </Layout>
   );
 };

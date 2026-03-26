@@ -6,6 +6,15 @@ import { useNavigate } from "react-router-dom";
 import { Layout } from "@/components/layout/Layout";
 import { ProfileCard } from "@/components/cards/ProfileCard";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -29,11 +38,29 @@ type DiscoverCandidate = {
   interests?: string[];
   verified?: boolean;
   distanceKm?: number;
+  score?: number;
+  reasonTags?: string[];
+  photos?: string[];
 };
 
 type DiscoverFilter = "natural" | "location" | "interests";
 
 const NATURAL_SEEN_STORAGE_PREFIX = "discover:natural:seen:";
+const NATURAL_RECOMMENDATION_LIMIT = 100;
+
+const reasonTagLabel: Record<string, string> = {
+  same_interest: "Shared interests",
+  nearby: "Nearby you",
+  similar_behavior: "Similar activity",
+  mutual_connection: "Mutual connection",
+  profile_similarity: "Profile similarity",
+  recommended: "Recommended for you",
+};
+
+const buildReasonHint = (candidate: DiscoverCandidate) => {
+  const tag = candidate.reasonTags?.find((value) => reasonTagLabel[value]);
+  return tag ? reasonTagLabel[tag] : "Recommended for you";
+};
 
 const getSeenStorageKey = (clerkId: string) => `${NATURAL_SEEN_STORAGE_PREFIX}${clerkId}`;
 
@@ -57,6 +84,90 @@ const saveSeenUserIds = (clerkId: string, userIds: string[]) => {
   }
 };
 
+const dedupeCandidates = (candidates: DiscoverCandidate[]) => {
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    if (!candidate.userId || seen.has(candidate.userId)) return false;
+    seen.add(candidate.userId);
+    return true;
+  });
+};
+
+const shuffleInPlace = <T,>(items: T[]) => {
+  const next = [...items];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
+};
+
+const shuffleByWindow = (candidates: DiscoverCandidate[], windowSize = 6) => {
+  if (candidates.length <= 1) return candidates;
+  const result: DiscoverCandidate[] = [];
+  for (let index = 0; index < candidates.length; index += windowSize) {
+    const band = candidates.slice(index, index + windowSize);
+    result.push(...shuffleInPlace(band));
+  }
+  return result;
+};
+
+const buildNaturalOrder = (candidates: DiscoverCandidate[], seenIds: Set<string>) => {
+  const uniqueCandidates = dedupeCandidates(candidates);
+  const unseen = uniqueCandidates.filter((candidate) => !seenIds.has(candidate.userId));
+  const seen = uniqueCandidates.filter((candidate) => seenIds.has(candidate.userId));
+
+  // Keep relevance mostly intact while rotating profile order inside small bands.
+  return [...shuffleByWindow(unseen, 6), ...shuffleByWindow(seen, 6)];
+};
+
+const normalizeInterest = (value: string) => value.trim().toLowerCase();
+
+const interestOverlapCount = (candidate: DiscoverCandidate, myInterests: Set<string>) => {
+  if (myInterests.size === 0 || !candidate.interests || candidate.interests.length === 0) return 0;
+  return candidate.interests.reduce((count, interest) => {
+    return myInterests.has(normalizeInterest(interest)) ? count + 1 : count;
+  }, 0);
+};
+
+const prioritizeByInterests = (candidates: DiscoverCandidate[], myInterests: Set<string>) => {
+  const uniqueCandidates = dedupeCandidates(candidates);
+  if (myInterests.size === 0) return shuffleByWindow(uniqueCandidates, 6);
+
+  const shared = uniqueCandidates
+    .filter((candidate) => interestOverlapCount(candidate, myInterests) > 0)
+    .sort((a, b) => {
+      const overlapDiff = interestOverlapCount(b, myInterests) - interestOverlapCount(a, myInterests);
+      if (overlapDiff !== 0) return overlapDiff;
+      return (b.score ?? 0) - (a.score ?? 0);
+    });
+
+  const others = uniqueCandidates.filter((candidate) => interestOverlapCount(candidate, myInterests) === 0);
+  return [...shuffleByWindow(shared, 5), ...shuffleByWindow(others, 6)];
+};
+
+const mergeCandidates = (priorityCandidates: DiscoverCandidate[], baseCandidates: DiscoverCandidate[]) => {
+  const merged = [...priorityCandidates, ...baseCandidates];
+  return dedupeCandidates(merged);
+};
+
+const prioritizeByLocation = (candidates: DiscoverCandidate[], nearbyIds: Set<string>) => {
+  const uniqueCandidates = dedupeCandidates(candidates);
+  const nearby = uniqueCandidates.filter(
+    (candidate) => nearbyIds.has(candidate.userId) || typeof candidate.distanceKm === "number"
+  );
+  const others = uniqueCandidates.filter((candidate) => !nearbyIds.has(candidate.userId) && typeof candidate.distanceKm !== "number");
+
+  nearby.sort((a, b) => {
+    const aDistance = typeof a.distanceKm === "number" ? a.distanceKm : Number.MAX_SAFE_INTEGER;
+    const bDistance = typeof b.distanceKm === "number" ? b.distanceKm : Number.MAX_SAFE_INTEGER;
+    if (aDistance !== bDistance) return aDistance - bDistance;
+    return (b.score ?? 0) - (a.score ?? 0);
+  });
+
+  return [...shuffleByWindow(nearby, 5), ...shuffleByWindow(others, 6)];
+};
+
 export default function Discover() {
   const { user } = useUser();
   const { user: currentAccount } = useCurrentUser();
@@ -72,6 +183,9 @@ export default function Discover() {
 
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
+  const [bioDialogOpen, setBioDialogOpen] = useState(false);
+  const [selectedBioPhoto, setSelectedBioPhoto] = useState<string | null>(null);
+  const [myInterests, setMyInterests] = useState<Set<string>>(new Set());
 
   const isPremiumUser = Boolean(currentAccount?.premiumActive);
 
@@ -103,6 +217,41 @@ export default function Discover() {
 
   useEffect(() => {
     const clerkId = user?.id;
+    if (!clerkId) {
+      setMyInterests(new Set());
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchMyProfile = async () => {
+      try {
+        const response = await fetch(`/api/users/profile/${encodeURIComponent(clerkId)}`);
+        if (!response.ok) return;
+        const profile = (await response.json()) as { interests?: string[] };
+        const normalizedInterests = (profile.interests ?? [])
+          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+          .map(normalizeInterest);
+
+        if (!cancelled) {
+          setMyInterests(new Set(normalizedInterests));
+        }
+      } catch {
+        if (!cancelled) {
+          setMyInterests(new Set());
+        }
+      }
+    };
+
+    fetchMyProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    const clerkId = user?.id;
     if (!clerkId) return;
 
     let cancelled = false;
@@ -111,41 +260,41 @@ export default function Discover() {
       setLoading(true);
       setFetchError("");
       try {
-        const recommendationsEndpoint = `/api/discovery/recommendations?clerkId=${encodeURIComponent(clerkId)}&limit=40`;
-        let endpoint = recommendationsEndpoint;
-
-        if (activeFilter === "location") {
-          if (!isPremiumUser) {
-            throw new Error("Nearby GPS discovery is available for Premium only.");
-          }
-          const position = await getCurrentPosition();
-          endpoint = `/api/discovery/nearby?clerkId=${encodeURIComponent(clerkId)}&longitude=${position.longitude}&latitude=${position.latitude}&radiusKm=40&limit=40`;
-        } else if (activeFilter === "interests") {
-          endpoint = recommendationsEndpoint;
-        } else {
-          endpoint = recommendationsEndpoint;
-        }
-
-        let response = await fetch(endpoint);
-
-        if (!response.ok && activeFilter === "location") {
-          response = await fetch(recommendationsEndpoint);
-        }
-
-        if (!response.ok) {
-          const data = (await response.json().catch(() => ({}))) as { message?: string };
+        const naturalRecommendationsEndpoint = `/api/discovery/recommendations?clerkId=${encodeURIComponent(clerkId)}&limit=${NATURAL_RECOMMENDATION_LIMIT}`;
+        const baseResponse = await fetch(naturalRecommendationsEndpoint);
+        if (!baseResponse.ok) {
+          const data = (await baseResponse.json().catch(() => ({}))) as { message?: string };
           throw new Error(data.message || "Failed to load recommendations");
         }
 
-        const data = (await response.json()) as DiscoverCandidate[];
+        const baseCandidates = dedupeCandidates((await baseResponse.json()) as DiscoverCandidate[]);
+
+        let orderedCandidates: DiscoverCandidate[] = baseCandidates;
+
+        if (activeFilter === "location" && isPremiumUser) {
+          try {
+            const position = await getCurrentPosition();
+            const nearbyEndpoint = `/api/discovery/nearby?clerkId=${encodeURIComponent(clerkId)}&longitude=${position.longitude}&latitude=${position.latitude}&radiusKm=40&limit=${NATURAL_RECOMMENDATION_LIMIT}`;
+            const nearbyResponse = await fetch(nearbyEndpoint);
+            const nearbyCandidates = nearbyResponse.ok
+              ? ((await nearbyResponse.json()) as DiscoverCandidate[])
+              : [];
+            const nearbyIds = new Set(nearbyCandidates.map((candidate) => candidate.userId));
+            orderedCandidates = prioritizeByLocation(mergeCandidates(nearbyCandidates, baseCandidates), nearbyIds);
+          } catch {
+            // If geolocation is unavailable, keep recommendation list and only skip location boost.
+            orderedCandidates = shuffleByWindow(baseCandidates, 6);
+          }
+        } else if (activeFilter === "interests") {
+          orderedCandidates = prioritizeByInterests(baseCandidates, myInterests);
+        }
+
         if (!cancelled) {
           if (activeFilter === "natural") {
             const seenIds = new Set(loadSeenUserIds(clerkId));
-            const unseen = data.filter((candidate) => !seenIds.has(candidate.userId));
-            const seen = data.filter((candidate) => seenIds.has(candidate.userId));
-            setUsers(unseen.length > 0 ? [...unseen, ...seen] : data);
+            setUsers(buildNaturalOrder(baseCandidates, seenIds));
           } else {
-            setUsers(data);
+            setUsers(orderedCandidates);
           }
           setCurrentIndex(0);
         }
@@ -165,7 +314,7 @@ export default function Discover() {
     return () => {
       cancelled = true;
     };
-  }, [activeFilter, isPremiumUser, user?.id]);
+  }, [activeFilter, isPremiumUser, myInterests, user?.id]);
 
   const handleLocationFilterChange = (checked: boolean) => {
     if (checked && !isPremiumUser) {
@@ -204,7 +353,7 @@ export default function Discover() {
       name: currentCandidate.displayName,
       age: currentCandidate.age ?? 0,
       location: currentCandidate.location || "Unknown location",
-      bio: currentCandidate.bio || "",
+      bio: currentCandidate.bio?.trim() || "No bio provided yet.",
       image:
         currentCandidate.avatarUrl && currentCandidate.avatarUrl.trim().length > 0
           ? currentCandidate.avatarUrl
@@ -215,8 +364,22 @@ export default function Discover() {
         typeof currentCandidate.distanceKm === "number"
           ? `${currentCandidate.distanceKm.toFixed(1)} km away`
           : undefined,
+      reasonHint: buildReasonHint(currentCandidate),
+      photos:
+        currentCandidate.photos && currentCandidate.photos.length > 0
+          ? currentCandidate.photos
+          : [
+              currentCandidate.avatarUrl && currentCandidate.avatarUrl.trim().length > 0
+                ? currentCandidate.avatarUrl
+                : "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=500&fit=crop",
+            ],
     };
   }, [currentCandidate]);
+
+  useEffect(() => {
+    if (!bioDialogOpen || !currentCard) return;
+    setSelectedBioPhoto(currentCard.photos[0] || null);
+  }, [bioDialogOpen, currentCard]);
 
   const nextCard = () => {
     setTimeout(() => {
@@ -330,6 +493,7 @@ export default function Discover() {
                       user={currentCard}
                       onMatch={handleMatch}
                       onPass={handlePass}
+                      onViewBio={() => setBioDialogOpen(true)}
                       onReport={() => setReportDialogOpen(true)}
                       onBlock={() => setBlockDialogOpen(true)}
                     />
@@ -346,6 +510,120 @@ export default function Discover() {
           </div>
         </div>
       </div>
+
+      <Dialog open={bioDialogOpen} onOpenChange={setBioDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto p-0">
+          {currentCard && (
+            <div>
+              <div className="relative h-52 bg-muted">
+                <img
+                  src={currentCard.image}
+                  alt={currentCard.name}
+                  className="h-full w-full object-cover"
+                />
+                <div className="absolute inset-0 bg-black/40" />
+                <div className="absolute bottom-4 left-4 text-white">
+                  <h2 className="text-2xl font-bold">{currentCard.name}, {currentCard.age}</h2>
+                  <p className="text-sm text-white/90">{currentCard.location}</p>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-6">
+                <DialogHeader className="text-left">
+                  <DialogTitle>Profile Bio</DialogTitle>
+                  <DialogDescription>
+                    Read their profile details before you decide to pass or match.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <Tabs defaultValue="about" className="space-y-4">
+                  <TabsList className="grid w-full grid-cols-3 rounded-xl">
+                    <TabsTrigger value="posts">Posts</TabsTrigger>
+                    <TabsTrigger value="photos">Photos</TabsTrigger>
+                    <TabsTrigger value="about">About</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="posts" className="space-y-3">
+                    <div className="rounded-xl border p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Latest Intro Post</p>
+                      <p className="text-sm leading-6 text-foreground whitespace-pre-wrap mt-2">{currentCard.bio}</p>
+                      <p className="text-xs text-muted-foreground mt-3">Shared from profile intro</p>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="photos" className="space-y-3">
+                    <div className="overflow-hidden rounded-xl border bg-muted">
+                      <img
+                        src={selectedBioPhoto || currentCard.photos[0]}
+                        alt={`${currentCard.name} selected photo`}
+                        className="h-72 w-full object-cover"
+                      />
+                    </div>
+                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                      {currentCard.photos.map((photo, index) => (
+                        <button
+                          key={`${photo}-${index}`}
+                          type="button"
+                          onClick={() => setSelectedBioPhoto(photo)}
+                          className={`overflow-hidden rounded-lg border bg-muted transition ${
+                            (selectedBioPhoto || currentCard.photos[0]) === photo
+                              ? "ring-2 ring-primary border-primary"
+                              : "hover:border-primary/40"
+                          }`}
+                        >
+                          <img
+                            src={photo}
+                            alt={`${currentCard.name} photo ${index + 1}`}
+                            className="h-20 w-full object-cover"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="about" className="space-y-4">
+                    <section className="space-y-2">
+                      <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Basic Info</h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                        <div className="rounded-lg border p-3">
+                          <p className="text-muted-foreground">Location</p>
+                          <p className="font-medium">{currentCard.location}</p>
+                        </div>
+                        <div className="rounded-lg border p-3">
+                          <p className="text-muted-foreground">Distance</p>
+                          <p className="font-medium">{currentCard.distance || "Not available"}</p>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="space-y-2">
+                      <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Interests</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {currentCard.interests.length > 0 ? (
+                          currentCard.interests.map((interest) => (
+                            <Badge key={interest} variant="secondary">{interest}</Badge>
+                          ))
+                        ) : (
+                          <p className="text-sm text-muted-foreground">No interests added yet.</p>
+                        )}
+                      </div>
+                    </section>
+
+                    <section className="rounded-lg border bg-muted/30 p-3">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Why this profile is shown</p>
+                      <p className="text-sm font-medium mt-1">{currentCard.reasonHint}</p>
+                    </section>
+                  </TabsContent>
+                </Tabs>
+
+                <div className="flex justify-center gap-3 pt-2">
+                  <Button variant="outline" onClick={() => setBioDialogOpen(false)}>Back to Discover</Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {currentCandidate && (
         <>

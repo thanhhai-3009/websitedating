@@ -31,6 +31,7 @@ interface AppointmentResponse {
   id: string;
   creatorId?: string;
   participantId?: string;
+  status?: string;
   scheduledTime?: string;
   location?: {
     placeName?: string;
@@ -94,6 +95,16 @@ export default function DateReview() {
           const appointmentData = (await appointmentRes.json()) as AppointmentResponse;
           setAppointment(appointmentData);
 
+          // If appointment is not completed, do not allow review submission
+          if (appointmentData.status && String(appointmentData.status).toLowerCase() !== "completed") {
+            // still allow loading existing review (if any), but inform user
+            toast({
+              title: "Cannot write review",
+              description: "You can only review completed appointments.",
+              variant: "destructive",
+            });
+          }
+
           const counterpartId =
             appointmentData.creatorId && appointmentData.creatorId !== appointmentData.participantId
               ? appointmentData.creatorId
@@ -124,8 +135,8 @@ export default function DateReview() {
         }
       } catch (error: any) {
         toast({
-          title: "Không tải được dữ liệu review",
-          description: error?.message || "Vui lòng thử lại.",
+          title: "Cannot load review data",
+          description: error?.message || "Please try again.",
           variant: "destructive",
         });
       } finally {
@@ -151,7 +162,7 @@ export default function DateReview() {
     e.preventDefault();
 
     if (!appointmentId) {
-      toast({ title: "Thiếu appointmentId", variant: "destructive" });
+      toast({ title: "Missing appointmentId", variant: "destructive" });
       return;
     }
 
@@ -161,6 +172,11 @@ export default function DateReview() {
     }
 
     try {
+      // prevent submit if appointment is not completed
+      if (appointment?.status && String(appointment.status).toLowerCase() !== "completed") {
+        toast({ title: "Cannot save review", description: "Only completed appointments can be reviewed.", variant: "destructive" });
+        return;
+      }
       const token = await getApiToken(getToken);
       if (!token) {
         throw new Error("Missing auth token");
@@ -192,12 +208,12 @@ export default function DateReview() {
       setSubmitted(true);
       toast({
         title: existingReview ? "Review updated" : "Review submitted!",
-        description: "Cảm ơn bạn đã chia sẻ trải nghiệm.",
+        description: "Thank you for sharing your experience.",
       });
     } catch (error: any) {
       toast({
-        title: "Lưu review thất bại",
-        description: error?.message || "Vui lòng thử lại.",
+        title: "Failed to save review",
+        description: error?.message || "Please try again.",
         variant: "destructive",
       });
     }

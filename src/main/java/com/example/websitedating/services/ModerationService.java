@@ -31,16 +31,19 @@ public class ModerationService {
     private final BlockRepository blockRepository;
     private final ReportRepository reportRepository;
     private final ConnectionRepository connectionRepository;
+    private final BanEmailService banEmailService;
 
     public ModerationService(
             UserRepository userRepository,
             BlockRepository blockRepository,
             ReportRepository reportRepository,
-            ConnectionRepository connectionRepository) {
+            ConnectionRepository connectionRepository,
+            BanEmailService banEmailService) {
         this.userRepository = userRepository;
         this.blockRepository = blockRepository;
         this.reportRepository = reportRepository;
         this.connectionRepository = connectionRepository;
+        this.banEmailService = banEmailService;
     }
 
     // ─── BLOCK ────────────────────────────────────────────────────────────────
@@ -151,13 +154,26 @@ public class ModerationService {
 
     // ─── ADMIN: BAN ───────────────────────────────────────────────────────────
 
-    public User banUser(String userId, String reason) {
+    public User banUser(String userId, String reason, Integer banDurationHours) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        Instant bannedAt = Instant.now();
+        int effectiveDurationHours = banDurationHours == null ? 24 * 7 : Math.max(1, banDurationHours);
+        Instant banExpiresAt = bannedAt.plusSeconds((long) effectiveDurationHours * 3600L);
+
         user.setIsBanned(true);
         user.setBanReason(reason);
-        user.setBannedAt(Instant.now());
-        return userRepository.save(user);
+        user.setBannedAt(bannedAt);
+        user.setBanDurationHours(effectiveDurationHours);
+        user.setBanExpiresAt(banExpiresAt);
+        User saved = userRepository.save(user);
+
+        if (banEmailService != null) {
+            banEmailService.sendBanEmail(saved, reason, banExpiresAt);
+        }
+
+        return saved;
     }
 
     public User unbanUser(String userId) {
@@ -166,6 +182,8 @@ public class ModerationService {
         user.setIsBanned(false);
         user.setBanReason(null);
         user.setBannedAt(null);
+        user.setBanDurationHours(null);
+        user.setBanExpiresAt(null);
         return userRepository.save(user);
     }
 

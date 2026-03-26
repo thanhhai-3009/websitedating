@@ -228,10 +228,10 @@ export default function Onboarding() {
 
       if (!response.ok) {
         const data = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(data.message || "Lưu thông tin thất bại");
+        throw new Error(data.message || "Failed to save information");
       }
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Lưu thông tin thất bại");
+      setSaveError(error instanceof Error ? error.message : "Failed to save information");
       throw error;
     } finally {
       setIsSaving(false);
@@ -391,7 +391,7 @@ export default function Onboarding() {
                     <span className="text-muted-foreground">
                       {formData.longitude !== undefined && formData.latitude !== undefined
                         ? `GPS: ${formData.latitude.toFixed(6)}, ${formData.longitude.toFixed(6)}`
-                        : "Chua lay duoc toa do GPS"}
+                        : "GPS coordinates not available"}
                     </span>
                     <Button
                       type="button"

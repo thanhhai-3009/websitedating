@@ -13,7 +13,7 @@ public class ClerkService {
     private final String clerkSecretKey;
     private final RestTemplate restTemplate;
 
-    public ClerkService(@Value("${app.clerk.secret-key}") String clerkSecretKey) {
+    public ClerkService(@Value("${app.clerk.secret-key:}") String clerkSecretKey) {
         this.clerkSecretKey = clerkSecretKey;
         this.restTemplate = new RestTemplate();
     }
