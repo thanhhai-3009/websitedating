@@ -51,9 +51,13 @@ export function toApiUrl(path: string) {
 export function resolveWebSocketUrl(defaultPath = "/ws-signal") {
   const configured = String(import.meta.env.VITE_WEBRTC_WS_URL || "").trim();
   if (configured) {
-    return normalizeWebSocketUrl(configured, defaultPath);
+    const result = normalizeWebSocketUrl(configured, defaultPath);
+    console.log("[runtimeApi] Resolved WebSocket URL from VITE_WEBRTC_WS_URL:", result);
+    return result;
   }
 
   // Fallback to absolute backend ws URL only.
-  return `${resolveApiBaseUrl().replace(/^http/i, "ws")}${defaultPath}`;
+  const fallback = `${resolveApiBaseUrl().replace(/^http/i, "ws")}${defaultPath}`;
+  console.log("[runtimeApi] Fallback WebSocket URL:", fallback);
+  return fallback;
 }

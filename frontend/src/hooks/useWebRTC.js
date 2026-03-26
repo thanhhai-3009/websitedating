@@ -12,7 +12,27 @@ function buildTrackConstraint(deviceId) {
   if (!deviceId) {
     return true;
   }
-  return { deviceId: { exact: deviceId } };
+  // exact can fail silently on mobile browsers; ideal is safer across tunnel + iOS/Android.
+  return { deviceId: { ideal: deviceId } };
+}
+
+function buildVideoConstraint(deviceId) {
+  if (deviceId) {
+    return {
+      deviceId: { ideal: deviceId },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+      frameRate: { ideal: 24, max: 30 },
+    };
+  }
+
+  // Prefer front camera on mobile; desktop browsers ignore facingMode safely.
+  return {
+    facingMode: { ideal: "user" },
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+    frameRate: { ideal: 24, max: 30 },
+  };
 }
 
 function buildMediaConstraints(mode, mediaPreferences = null) {
@@ -21,27 +41,60 @@ function buildMediaConstraints(mode, mediaPreferences = null) {
 
   return {
     audio: buildTrackConstraint(audioInputDeviceId),
-    video: mode === "video" ? buildTrackConstraint(videoInputDeviceId) : false,
+    video: mode === "video" ? buildVideoConstraint(videoInputDeviceId) : false,
   };
 }
 
 async function getPreferredUserMedia(mode, mediaPreferences = null) {
   const constraints = buildMediaConstraints(mode, mediaPreferences);
   try {
-    return await navigator.mediaDevices.getUserMedia(constraints);
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    if (mode === "video" && stream.getVideoTracks().length === 0) {
+      throw new Error("Camera stream is unavailable.");
+    }
+    stream.getTracks().forEach((track) => {
+      track.enabled = true;
+    });
+    return stream;
   } catch (error) {
     const hasPreferredDevice = Boolean(
       mediaPreferences?.audioInputDeviceId || mediaPreferences?.videoInputDeviceId
     );
+
+    // Retry with safer fallback constraints for mobile browsers.
+    const fallbackConstraints = {
+      audio: true,
+      video: mode === "video"
+        ? {
+            facingMode: { ideal: "user" },
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            frameRate: { ideal: 20, max: 24 },
+          }
+        : false,
+    };
+
+    // If no explicit device chosen, keep old behavior: throw original error.
     if (!hasPreferredDevice) {
-      throw error;
+      const secondTry = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+      if (mode === "video" && secondTry.getVideoTracks().length === 0) {
+        throw error;
+      }
+      secondTry.getTracks().forEach((track) => {
+        track.enabled = true;
+      });
+      return secondTry;
     }
 
-    // Fallback to default devices if the selected one is unavailable.
-    return navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: mode === "video",
+    const fallbackStream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+    if (mode === "video" && fallbackStream.getVideoTracks().length === 0) {
+      throw new Error("Camera stream is unavailable.");
+    }
+
+    fallbackStream.getTracks().forEach((track) => {
+      track.enabled = true;
     });
+    return fallbackStream;
   }
 }
 
@@ -62,6 +115,25 @@ function buildWebSocketUrl(baseUrl, token) {
   return `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
 }
 
+function normalizeSessionDescription(rawData) {
+  const parsed = parseSignalData(rawData);
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+
+  // Case A: wrapped payload { sdp: { type, sdp }, mode }
+  if (parsed.sdp && typeof parsed.sdp === "object" && parsed.sdp.type && parsed.sdp.sdp) {
+    return parsed.sdp;
+  }
+
+  // Case B: direct payload { type, sdp }
+  if (parsed.type && parsed.sdp) {
+    return parsed;
+  }
+
+  return null;
+}
+
 export function useWebRTC(roomId, senderId, mediaPreferences = null) {
   const { getToken, userId } = useAuth();
   const signalingSenderId = senderId || userId;
@@ -74,6 +146,8 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
   const [incomingCall, setIncomingCall] = useState(null);
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isCameraOff, setIsCameraOff] = useState(false);
 
   const wsRef = useRef(null);
   const reconnectTimerRef = useRef(null);
@@ -86,6 +160,8 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
   const activeTargetIdRef = useRef(null);
   const activeSignalRoomIdRef = useRef(null);
   const rtcConfigRef = useRef(DEFAULT_RTC_CONFIG);
+  const remoteStreamRef = useRef(new MediaStream());
+  const cameraFacingModeRef = useRef("user");
 
   const normalizedRoomId = useMemo(() => roomId || null, [roomId]);
 
@@ -167,6 +243,7 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
     pendingCallerRef.current = null;
     activeTargetIdRef.current = null;
     activeSignalRoomIdRef.current = null;
+    remoteStreamRef.current = new MediaStream();
     setRemoteStream(null);
   }, []);
 
@@ -177,6 +254,9 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
       }
       return null;
     });
+    setIsMuted(false);
+    setIsCameraOff(false);
+    cameraFacingModeRef.current = "user";
   }, []);
 
   const ensurePeerConnection = useCallback(
@@ -197,21 +277,43 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
       };
 
       peerConnection.ontrack = (event) => {
-        if (event.streams?.[0]) {
-          setRemoteStream(event.streams[0]);
-          return;
-        }
-        const fallbackStream = new MediaStream([event.track]);
-        setRemoteStream(fallbackStream);
+        const aggregated = remoteStreamRef.current || new MediaStream();
+
+        // Merge all incoming tracks (works whether browser sends event.streams or bare track).
+        const incomingTracks = event.streams?.[0]?.getTracks?.() || [event.track];
+        incomingTracks.forEach((track) => {
+          const exists = aggregated.getTracks().some((value) => value.id === track.id);
+          if (!exists) {
+            aggregated.addTrack(track);
+          }
+        });
+
+        remoteStreamRef.current = aggregated;
+        // Force React/video refresh with a fresh MediaStream instance.
+        setRemoteStream(new MediaStream(aggregated.getTracks()));
       };
 
       peerConnection.onconnectionstatechange = () => {
         const state = peerConnection.connectionState;
-        if (state === "failed" || state === "disconnected" || state === "closed") {
+
+        if (state === "failed" || state === "closed") {
           cleanupPeerConnection();
           stopLocalMedia();
           setIncomingCall(null);
           setIsInCall(false);
+          return;
+        }
+
+        // "disconnected" can be transient on mobile/wifi handover.
+        if (state === "disconnected") {
+          window.setTimeout(() => {
+            if (peerConnectionRef.current?.connectionState === "disconnected") {
+              cleanupPeerConnection();
+              stopLocalMedia();
+              setIncomingCall(null);
+              setIsInCall(false);
+            }
+          }, 5000);
         }
       };
 
@@ -220,21 +322,6 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
     },
     [cleanupPeerConnection, sendSignal, stopLocalMedia]
   );
-
-  const attachStreamToPeer = useCallback((peerConnection, stream) => {
-    const existingTrackIds = new Set(
-      peerConnection
-        .getSenders()
-        .map((sender) => sender.track?.id)
-        .filter(Boolean)
-    );
-
-    stream.getTracks().forEach((track) => {
-      if (!existingTrackIds.has(track.id)) {
-        peerConnection.addTrack(track, stream);
-      }
-    });
-  }, []);
 
   const flushPendingIceCandidates = useCallback(async (peerConnection) => {
     const pending = [...pendingIceCandidatesRef.current];
@@ -261,14 +348,28 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
 
         const stream = await getPreferredUserMedia(mode, mediaPreferences);
         setLocalStream(stream);
+        setIsMuted(false);
+        setIsCameraOff(mode !== "video");
 
         const peerConnection = ensurePeerConnection(targetId);
-        attachStreamToPeer(peerConnection, stream);
+        // Caller must attach local tracks before creating offer (full-duplex fix).
+        peerConnection.getSenders().forEach((sender) => {
+          if (sender.track && (sender.track.kind === "audio" || sender.track.kind === "video")) {
+            try {
+              peerConnection.removeTrack(sender);
+            } catch {
+              // Ignore stale sender errors.
+            }
+          }
+        });
+        stream.getTracks().forEach((track) => {
+          peerConnection.addTrack(track, stream);
+        });
 
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
 
-        sendSignal(
+        const sent = sendSignal(
           "OFFER",
           JSON.stringify({
             sdp: offer,
@@ -277,12 +378,19 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
           targetId
         );
 
+        if (!sent) {
+          cleanupPeerConnection();
+          stopLocalMedia();
+          setIsInCall(false);
+          return;
+        }
+
         setIsInCall(true);
       } catch (error) {
         setCallError(error?.message || "Could not start call.");
       }
     },
-    [attachStreamToPeer, ensurePeerConnection, mediaPreferences, normalizedRoomId, sendSignal]
+    [cleanupPeerConnection, ensurePeerConnection, mediaPreferences, normalizedRoomId, sendSignal, stopLocalMedia]
   );
 
   const acceptIncomingCall = useCallback(async () => {
@@ -299,9 +407,23 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
 
       const stream = await getPreferredUserMedia(callMode, mediaPreferences);
       setLocalStream(stream);
+      setIsMuted(false);
+      setIsCameraOff(callMode !== "video");
 
       const peerConnection = ensurePeerConnection(callerId);
-      attachStreamToPeer(peerConnection, stream);
+      // Callee must attach local tracks before creating answer (full-duplex fix).
+      peerConnection.getSenders().forEach((sender) => {
+        if (sender.track && (sender.track.kind === "audio" || sender.track.kind === "video")) {
+          try {
+            peerConnection.removeTrack(sender);
+          } catch {
+            // Ignore stale sender errors.
+          }
+        }
+      });
+      stream.getTracks().forEach((track) => {
+        peerConnection.addTrack(track, stream);
+      });
 
       await peerConnection.setRemoteDescription(new RTCSessionDescription(pendingOffer));
       await flushPendingIceCandidates(peerConnection);
@@ -309,12 +431,19 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
 
-      sendSignal("ANSWER", JSON.stringify(answer), callerId);
+      const sent = sendSignal("ANSWER", JSON.stringify(answer), callerId);
+      if (!sent) {
+        cleanupPeerConnection();
+        stopLocalMedia();
+        setIsInCall(false);
+        return;
+      }
+
       setIsInCall(true);
     } catch (error) {
       setCallError(error?.message || "Could not accept call.");
     }
-  }, [attachStreamToPeer, callMode, ensurePeerConnection, flushPendingIceCandidates, mediaPreferences, sendSignal]);
+  }, [callMode, cleanupPeerConnection, ensurePeerConnection, flushPendingIceCandidates, mediaPreferences, sendSignal, stopLocalMedia]);
 
   const rejectIncomingCall = useCallback(() => {
     const callerId = pendingCallerRef.current;
@@ -339,6 +468,92 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
     setCallError(null);
   }, [cleanupPeerConnection, sendSignal, stopLocalMedia]);
 
+  const toggleMute = useCallback(() => {
+    if (!localStream) {
+      return;
+    }
+    const audioTracks = localStream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      return;
+    }
+
+    const nextMuted = !isMuted;
+    audioTracks.forEach((track) => {
+      track.enabled = !nextMuted;
+    });
+    setIsMuted(nextMuted);
+  }, [isMuted, localStream]);
+
+  const toggleCamera = useCallback(() => {
+    if (!localStream) {
+      return;
+    }
+    const videoTracks = localStream.getVideoTracks();
+    if (videoTracks.length === 0) {
+      return;
+    }
+
+    const nextCameraOff = !isCameraOff;
+    videoTracks.forEach((track) => {
+      track.enabled = !nextCameraOff;
+    });
+    setIsCameraOff(nextCameraOff);
+  }, [isCameraOff, localStream]);
+
+  const flipCamera = useCallback(async () => {
+    if (!localStream || callMode !== "video") {
+      return;
+    }
+
+    const nextFacing = cameraFacingModeRef.current === "user" ? "environment" : "user";
+
+    try {
+      const flippedStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: nextFacing },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 24, max: 30 },
+        },
+      });
+
+      const nextVideoTrack = flippedStream.getVideoTracks()[0];
+      if (!nextVideoTrack) {
+        return;
+      }
+
+      nextVideoTrack.enabled = !isCameraOff;
+
+      localStream.getVideoTracks().forEach((track) => {
+        localStream.removeTrack(track);
+        track.stop();
+      });
+      localStream.addTrack(nextVideoTrack);
+
+      const peerConnection = peerConnectionRef.current;
+      if (peerConnection) {
+        const videoSender = peerConnection.getSenders().find((sender) => sender.track?.kind === "video");
+        if (videoSender) {
+          await videoSender.replaceTrack(nextVideoTrack);
+        } else {
+          peerConnection.addTrack(nextVideoTrack, localStream);
+        }
+      }
+
+      cameraFacingModeRef.current = nextFacing;
+      setLocalStream(new MediaStream(localStream.getTracks()));
+
+      flippedStream.getTracks().forEach((track) => {
+        if (track.id !== nextVideoTrack.id) {
+          track.stop();
+        }
+      });
+    } catch (error) {
+      setCallError(error?.message || "Cannot switch camera.");
+    }
+  }, [callMode, isCameraOff, localStream]);
+
   useEffect(() => {
     if (!normalizedRoomId || !signalingSenderId) {
       setIsSignalingConnected(false);
@@ -360,7 +575,8 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
           return;
         }
 
-        const socket = new WebSocket(buildWebSocketUrl(signalingWsUrl, token));
+        const wsUrl = buildWebSocketUrl(signalingWsUrl, token);
+        const socket = new WebSocket(wsUrl);
         wsRef.current = socket;
 
         socket.onopen = () => {
@@ -388,8 +604,8 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
             }
 
             if (payload.type === "OFFER") {
+              const offer = normalizeSessionDescription(payload.data);
               const parsed = parseSignalData(payload.data);
-              const offer = parsed?.sdp || parsed;
               const incomingMode = parsed?.mode === "audio" ? "audio" : "video";
               if (!offer) {
                 return;
@@ -409,8 +625,7 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
             }
 
             if (payload.type === "ANSWER") {
-              const parsed = parseSignalData(payload.data);
-              const answer = parsed?.sdp || parsed;
+              const answer = normalizeSessionDescription(payload.data);
               if (peerConnectionRef.current && answer) {
                 await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answer));
                 await flushPendingIceCandidates(peerConnectionRef.current);
@@ -437,6 +652,7 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
 
         socket.onerror = () => {
           setIsSignalingConnected(false);
+          setCallError("WebSocket signaling error.");
         };
 
         socket.onclose = () => {
@@ -478,10 +694,15 @@ export function useWebRTC(roomId, senderId, mediaPreferences = null) {
     incomingCall,
     localStream,
     remoteStream,
+    isMuted,
+    isCameraOff,
     startAudioCall: (targetId = null) => startCall("audio", targetId),
     startVideoCall: (targetId = null) => startCall("video", targetId),
     acceptIncomingCall,
     rejectIncomingCall,
     endCall,
+    toggleMute,
+    toggleCamera,
+    flipCamera,
   };
 }

@@ -9,6 +9,9 @@ import {
   Verified,
   PhoneOff,
   Crown,
+  Mic,
+  MicOff,
+  RefreshCw,
 } from "lucide-react";
 import axios from "axios";
 import { useAuth } from "@clerk/clerk-react";
@@ -96,7 +99,7 @@ export default function Messages() {
   const navigate = useNavigate();
   const preselectedConversationId = (location.state as { selectedConversationId?: string } | null)?.selectedConversationId;
   const { userId: clerkId, userId } = useAuth();
-  const { isLoading: isCurrentUserLoading } = useCurrentUser();
+  const { user: currentUser } = useCurrentUser();
   // Tam thoi mo khoa tinh nang messenger/video call de test MVP.
   const isMessagesLocked = false;
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
@@ -432,14 +435,23 @@ export default function Messages() {
     incomingCall,
     localStream,
     remoteStream,
+    isMuted,
     startAudioCall,
     startVideoCall,
     acceptIncomingCall,
     rejectIncomingCall,
     endCall,
+    toggleMute,
+    flipCamera,
   } = useWebRTC(effectiveRoomId, clerkId, mediaPreferences);
 
   const callTargetId = selectedChat?.clerkId || null;
+  const callDisplayHost = useMemo(() => {
+    if (typeof window === "undefined") {
+      return "trycloudflare.com";
+    }
+    return window.location.host;
+  }, []);
 
   useEffect(() => {
     if (!messagesViewportRef.current) {
@@ -452,25 +464,65 @@ export default function Messages() {
   }, [mappedLiveMessages.length, selectedConversation]);
 
   useEffect(() => {
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = localStream || null;
-      localVideoRef.current.play().catch(() => {});
+    if (!localVideoRef.current) {
+      return;
     }
+
+    const video = localVideoRef.current;
+    video.srcObject = localStream || null;
+    video.muted = true;
+
+    const tryPlay = () => {
+      video.play().catch(() => {});
+    };
+
+    if (localStream && isInCall) {
+      video.addEventListener("loadedmetadata", tryPlay);
+      video.addEventListener("canplay", tryPlay);
+      tryPlay();
+    }
+
+    return () => {
+      video.removeEventListener("loadedmetadata", tryPlay);
+      video.removeEventListener("canplay", tryPlay);
+    };
+  }, [isInCall, localStream]);
+
+  useEffect(() => {
+    if (!remoteVideoRef.current) {
+      return;
+    }
+
+    const video = remoteVideoRef.current;
+    video.srcObject = remoteStream || null;
+
+    const tryPlay = () => {
+      video.play().catch(() => {});
+    };
+
+    if (remoteStream && isInCall) {
+      video.addEventListener("loadedmetadata", tryPlay);
+      video.addEventListener("canplay", tryPlay);
+      tryPlay();
+    }
+
+    return () => {
+      video.removeEventListener("loadedmetadata", tryPlay);
+      video.removeEventListener("canplay", tryPlay);
+    };
+  }, [isInCall, remoteStream]);
+
+  useEffect(() => {
     if (localAudioRef.current) {
       localAudioRef.current.srcObject = localStream || null;
     }
-  }, [localStream]);
+  }, [isInCall, localStream]);
 
   useEffect(() => {
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = remoteStream || null;
-      remoteVideoRef.current.play().catch(() => {});
-    }
     if (remoteAudioRef.current) {
       remoteAudioRef.current.srcObject = remoteStream || null;
-      remoteAudioRef.current.play().catch(() => {});
     }
-  }, [remoteStream]);
+  }, [isInCall, remoteStream]);
 
   useEffect(() => {
     if (!speakerSelectionSupported || !selectedAudioOutputId || !remoteAudioRef.current) {
@@ -626,10 +678,30 @@ export default function Messages() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" onClick={() => startAudioCall(callTargetId)}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      if (!callTargetId) {
+                        return;
+                      }
+                      startAudioCall(callTargetId);
+                    }}
+                    disabled={!callTargetId}
+                  >
                     <Phone className="w-5 h-5" />
                   </Button>
-                  <Button variant="ghost" size="icon" onClick={() => startVideoCall(callTargetId)}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      if (!callTargetId) {
+                        return;
+                      }
+                      startVideoCall(callTargetId);
+                    }}
+                    disabled={!callTargetId}
+                  >
                     <Video className="w-5 h-5" />
                   </Button>
                   <Button variant="ghost" size="icon">
@@ -731,7 +803,8 @@ export default function Messages() {
                       status={msg.status}
                     />
                   ))
-                )}
+                )
+                }
                 <div ref={messagesEndRef} />
               </div>
 
@@ -754,62 +827,135 @@ export default function Messages() {
               />
 
               <Dialog open={isInCall}>
-                <DialogContent className="max-w-3xl">
+                <DialogContent className="max-w-md border-0 bg-transparent p-0 shadow-none">
                   <DialogHeader>
                     <DialogTitle>{callMode === "audio" ? "Audio call" : "Video call"}</DialogTitle>
                     <DialogDescription>
-                      {selectedChat.user.name} - press end call to stop.
+                      {selectedChat?.user.name} - press end call to stop.
                     </DialogDescription>
                   </DialogHeader>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="rounded-lg bg-secondary/60 p-2">
-                      <p className="text-xs text-muted-foreground mb-2">You</p>
-                      {callMode === "video" ? (
-                        <video ref={localVideoRef} autoPlay muted playsInline className="w-full rounded-md bg-black min-h-48" />
-                      ) : (
-                        <div className="w-full min-h-48 rounded-md bg-black/80 flex items-center justify-center text-white text-sm">
-                          Audio only
-                         </div>
-                      )}
-                      <audio ref={localAudioRef} autoPlay muted className="hidden" />
-                    </div>
-                    <div className="rounded-lg bg-secondary/60 p-2">
-                      <p className="text-xs text-muted-foreground mb-2">{selectedChat.user.name}</p>
-                      {callMode === "video" ? (
-                        <video ref={remoteVideoRef} autoPlay playsInline className="w-full rounded-md bg-black min-h-48" />
-                      ) : (
-                        <div className="w-full min-h-48 rounded-md bg-black/80 flex items-center justify-center text-white text-sm">
-                          Connecting audio...
+                  <div className="relative mx-auto w-full max-w-[390px] overflow-hidden rounded-[34px] border border-white/20 bg-black/70 p-3 shadow-2xl backdrop-blur">
+                    <div className="rounded-[26px] bg-black/60 p-3">
+                      <div className="mb-2 flex items-center justify-between px-1 text-[11px] text-white/80">
+                        <span>15:06</span>
+                        <span className="max-w-[230px] truncate">{callDisplayHost}</span>
+                      </div>
+
+                      <div className="mb-2 rounded-2xl bg-black/70 px-3 py-2 text-white">
+                        <p className="text-sm font-semibold">Video call</p>
+                        <p className="text-xs text-white/80">{selectedChat?.user.name} - press end call to stop.</p>
+                      </div>
+
+                      <div className="space-y-3 pb-24">
+                        <div className="relative h-[240px] overflow-hidden rounded-2xl bg-neutral-900">
+                          {callMode === "video" ? (
+                            <video
+                              ref={(node) => {
+                                localVideoRef.current = node;
+                                if (node) {
+                                  node.srcObject = localStream || null;
+                                  node.muted = true;
+                                  if (localStream) {
+                                    node.play().catch(() => {});
+                                  }
+                                }
+                              }}
+                              autoPlay
+                              muted
+                              playsInline
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-sm text-white/80">Audio only</div>
+                          )}
+                          <div className="absolute left-3 top-3 rounded-full bg-black/55 px-3 py-1 text-xs text-white">
+                            You - {currentUser?.username || "User"}
+                          </div>
                         </div>
-                      )}
-                      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
+
+                        <div className="relative h-[240px] overflow-hidden rounded-2xl bg-neutral-900">
+                          {callMode === "video" ? (
+                            <video
+                              ref={(node) => {
+                                remoteVideoRef.current = node;
+                                if (node) {
+                                  node.srcObject = remoteStream || null;
+                                  if (remoteStream) {
+                                    node.play().catch(() => {});
+                                  }
+                                }
+                              }}
+                              autoPlay
+                              playsInline
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-sm text-white/80">Connecting audio...</div>
+                          )}
+                          <div className="absolute left-3 top-3 rounded-full bg-black/55 px-3 py-1 text-xs text-white">
+                            {selectedChat?.user.name}
+                          </div>
+                        </div>
+                      </div>
+
+                      <audio ref={localAudioRef} autoPlay muted playsInline style={{ display: "none" }} />
+                      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} />
+                    </div>
+
+                    <div className="absolute inset-x-4 bottom-4 rounded-2xl border border-white/20 bg-black/45 p-3 backdrop-blur-md">
+                      <div className="flex items-center justify-center gap-3">
+                        <button
+                          type="button"
+                          onClick={toggleMute}
+                          className="flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25"
+                          aria-label="Mute microphone"
+                        >
+                          {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (callMode === "video") {
+                              flipCamera();
+                            }
+                          }}
+                          className="flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25"
+                          aria-label="Flip camera"
+                          disabled={callMode !== "video"}
+                        >
+                          <RefreshCw className="h-5 w-5" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={endCall}
+                          className="inline-flex h-11 items-center gap-2 rounded-full bg-red-600 px-4 text-white transition hover:bg-red-500"
+                        >
+                          <PhoneOff className="h-4 w-4" />
+                          <span className="text-sm font-medium">End call</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
-
-                  <div className="flex justify-center">
-                    <Button variant="destructive" onClick={endCall} className="gap-2">
-                      <PhoneOff className="w-4 h-4" />
-                      End call
-                    </Button>
-                  </div>
                 </DialogContent>
               </Dialog>
 
-              <Dialog open={Boolean(incomingCall) && !isInCall}>
-                <DialogContent className="max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>Incoming {incomingCall?.mode === "audio" ? "audio" : "video"} call</DialogTitle>
-                    <DialogDescription>
-                      {selectedChat.user.name} is calling you.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="flex items-center justify-center gap-3">
-                    <Button variant="outline" onClick={rejectIncomingCall}>Reject</Button>
-                    <Button variant="gradient" onClick={acceptIncomingCall}>Accept</Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
+               <Dialog open={Boolean(incomingCall) && !isInCall}>
+                 <DialogContent className="max-w-md">
+                   <DialogHeader>
+                     <DialogTitle>Incoming {incomingCall?.mode === "audio" ? "audio" : "video"} call</DialogTitle>
+                     <DialogDescription>
+                       {selectedChat.user.name} is calling you.
+                     </DialogDescription>
+                   </DialogHeader>
+                   <div className="flex items-center justify-center gap-3">
+                     <Button variant="outline" onClick={rejectIncomingCall}>Reject</Button>
+                     <Button variant="gradient" onClick={acceptIncomingCall}>Accept</Button>
+                   </div>
+                 </DialogContent>
+               </Dialog>
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -844,7 +990,7 @@ export default function Messages() {
           </div>
         )}
 
-        {Boolean(clerkId) && isCurrentUserLoading && (
+        {Boolean(clerkId) && !currentUser && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
             <p className="text-sm text-muted-foreground">Checking premium access...</p>
           </div>

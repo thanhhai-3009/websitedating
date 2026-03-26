@@ -92,9 +92,16 @@ export function useNotifications() {
     queryKey: ["notifications", "unread", userId],
     queryFn: async () => {
       if (!userId) return [];
-      const res = await fetch(toApiUrl(`/api/notifications/unread?clerkId=${encodeURIComponent(userId)}`));
+      const token = await getApiToken(getToken);
+      const res = await fetch(toApiUrl(`/api/notifications/unread?clerkId=${encodeURIComponent(userId)}`), {
+        headers: token
+          ? {
+              Authorization: `Bearer ${token}`,
+            }
+          : undefined,
+      });
       if (!res.ok) {
-        if (await isUserNotFoundResponse(res)) {
+        if (res.status === 400 || res.status === 404 || await isUserNotFoundResponse(res)) {
           return [];
         }
         throw new Error("Failed to fetch unread notifications");
@@ -109,9 +116,16 @@ export function useNotifications() {
     queryKey: ["notifications", "all", userId],
     queryFn: async () => {
       if (!userId) return [];
-      const res = await fetch(toApiUrl(`/api/notifications?clerkId=${encodeURIComponent(userId)}`));
+      const token = await getApiToken(getToken);
+      const res = await fetch(toApiUrl(`/api/notifications?clerkId=${encodeURIComponent(userId)}`), {
+        headers: token
+          ? {
+              Authorization: `Bearer ${token}`,
+            }
+          : undefined,
+      });
       if (!res.ok) {
-        if (await isUserNotFoundResponse(res)) {
+        if (res.status === 400 || res.status === 404 || await isUserNotFoundResponse(res)) {
           return [];
         }
         throw new Error("Failed to fetch all notifications");
@@ -194,11 +208,17 @@ export function useNotifications() {
   const markAsRead = useMutation({
     mutationFn: async (notificationId: string) => {
       if (!userId) throw new Error("Not authenticated");
+      const token = await getApiToken(getToken);
       const res = await fetch(toApiUrl(`/api/notifications/${notificationId}/read?clerkId=${encodeURIComponent(userId)}`), {
         method: "PUT",
+        headers: token
+          ? {
+              Authorization: `Bearer ${token}`,
+            }
+          : undefined,
       });
       if (!res.ok) {
-        if (await isUserNotFoundResponse(res)) {
+        if (res.status === 400 || res.status === 404 || await isUserNotFoundResponse(res)) {
           return;
         }
         throw new Error("Failed to mark as read");
