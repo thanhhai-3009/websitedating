@@ -21,7 +21,8 @@ import {
   Tooltip, 
   ResponsiveContainer,
   BarChart,
-  Bar
+  Bar,
+  Cell
 } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -81,7 +82,7 @@ const ManagerRevenue = () => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `doanh_thu_${periodType.toLowerCase()}.csv`;
+      a.download = `revenue_report_detailed.csv`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -190,13 +191,7 @@ const ManagerRevenue = () => {
                    </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={[...data].reverse()}>
-                      <defs>
-                        <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#ff416c" stopOpacity={0.1}/>
-                          <stop offset="95%" stopColor="#ff416c" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
+                    <BarChart data={[...data].reverse()}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis 
                         dataKey="period" 
@@ -218,17 +213,19 @@ const ManagerRevenue = () => {
                           border: 'none', 
                           boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' 
                         }}
+                        cursor={{ fill: '#f8fafc' }}
                         formatter={(value: any) => [`${value.toLocaleString("en-US")} VND`, "Revenue"]}
                       />
-                      <Area 
-                        type="monotone" 
+                      <Bar 
                         dataKey="totalRevenue" 
-                        stroke="#ff416c" 
-                        strokeWidth={3}
-                        fillOpacity={1} 
-                        fill="url(#colorRev)" 
-                      />
-                    </AreaChart>
+                        radius={[8, 8, 0, 0]} 
+                        barSize={40}
+                      >
+                        {[...data].reverse().map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={index % 2 === 0 ? "#ff416c" : "#ff4b2b"} />
+                        ))}
+                      </Bar>
+                    </BarChart>
                   </ResponsiveContainer>
                 )}
               </CardContent>

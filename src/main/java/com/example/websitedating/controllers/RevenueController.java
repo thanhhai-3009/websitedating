@@ -1,6 +1,7 @@
 package com.example.websitedating.controllers;
 
 import com.example.websitedating.dto.RevenueSummary;
+import com.example.websitedating.dto.DetailedRevenueExport;
 import com.example.websitedating.services.RevenueService;
 import java.util.List;
 import org.springframework.http.HttpHeaders;
@@ -40,25 +41,12 @@ public class RevenueController {
 
     @GetMapping("/export")
     public ResponseEntity<byte[]> exportCsv(@RequestParam(defaultValue = "MONTH") String type) {
-        List<RevenueSummary> stats;
-        String fileName;
-        switch (type.toUpperCase()) {
-            case "QUARTER":
-                stats = revenueService.getQuarterlyRevenue();
-                fileName = "quarterly_revenue.csv";
-                break;
-            case "YEAR":
-                stats = revenueService.getYearlyRevenue();
-                fileName = "yearly_revenue.csv";
-                break;
-            default:
-                stats = revenueService.getMonthlyRevenue();
-                fileName = "monthly_revenue.csv";
-                break;
-        }
-
-        byte[] csvData = revenueService.generateCsv(stats, type);
-
+        List<DetailedRevenueExport> stats = revenueService.getDetailedRevenue();
+        byte[] csvData = revenueService.generateDetailedCsv(stats);
+        
+        int month = java.time.LocalDate.now().getMonthValue();
+        String fileName = "Revenue_Month_" + month + ".csv";
+        
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + fileName)
                 .contentType(MediaType.parseMediaType("text/csv"))
