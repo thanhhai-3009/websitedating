@@ -26,11 +26,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { resolveApiBaseUrl, toApiUrl } from "@/lib/runtimeApi";
 import { useChat } from "@/hooks/useChat";
 import { useWebRTC } from "@/hooks/useWebRTC";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const API_BASE_URL = resolveApiBaseUrl();
 
 interface MatchApiResponse {
   userId: string;
@@ -65,19 +66,6 @@ interface ResolvedUserResponse {
 
 const emojiList = ["😀", "😂", "😍", "🥰", "😎", "😅", "😘", "🥳", "❤️", "🔥", "🌹", "✨"];
 
-const toDisplayTime = (value?: string) => {
-  if (!value) {
-    return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-};
-
 const toDisplayTimestamp = (value?: string) => {
   if (!value) {
     return "Now";
@@ -99,8 +87,8 @@ const toDisplayTimestamp = (value?: string) => {
 const toAbsoluteMediaUrl = (url?: string) => {
   if (!url) return "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop";
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  if (url.startsWith("/")) return `${API_BASE_URL}${url}`;
-  return `${API_BASE_URL}/${url}`;
+  if (url.startsWith("/")) return API_BASE_URL ? `${API_BASE_URL}${url}` : url;
+  return API_BASE_URL ? `${API_BASE_URL}/${url}` : `/${url}`;
 };
 
 export default function Messages() {
@@ -108,9 +96,9 @@ export default function Messages() {
   const navigate = useNavigate();
   const preselectedConversationId = (location.state as { selectedConversationId?: string } | null)?.selectedConversationId;
   const { userId: clerkId, userId } = useAuth();
-  const { user: currentUser, isLoading: isCurrentUserLoading } = useCurrentUser();
-  const isPremiumUser = Boolean(currentUser?.premiumActive);
-  const isMessagesLocked = Boolean(clerkId) && !isCurrentUserLoading && !isPremiumUser;
+  const { isLoading: isCurrentUserLoading } = useCurrentUser();
+  // Tam thoi mo khoa tinh nang messenger/video call de test MVP.
+  const isMessagesLocked = false;
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [draftMessage, setDraftMessage] = useState("");
@@ -125,6 +113,7 @@ export default function Messages() {
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const localAudioRef = useRef<HTMLAudioElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const messagesViewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -146,8 +135,13 @@ export default function Messages() {
       setConversationsError(null);
 
       try {
-         const matchesResponse = await axios.get<MatchApiResponse[]>(`${API_BASE_URL}/api/discovery/matches`, {
-           params: { clerkId },
+         const matchesResponse = await axios.get<MatchApiResponse[]>(toApiUrl("/api/discovery/matches"), {
+           params: {
+             clerkId,
+             // Hien ca like da nhan/da gui de co danh sach test chat ngay ca khi chua mutual match.
+             includeLiked: true,
+             includeSentLiked: true,
+           },
          });
 
         if (!isMounted) return;
@@ -210,7 +204,7 @@ export default function Messages() {
       isMounted = false;
       window.clearInterval(refreshId);
     };
-  }, [clerkId, isMessagesLocked, preselectedConversationId, selectedConversation]);
+  }, [clerkId, isMessagesLocked, preselectedConversationId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -220,7 +214,7 @@ export default function Messages() {
         return;
       }
       try {
-        const response = await axios.get<ResolvedUserResponse>(`${API_BASE_URL}/api/users/resolve/${encodeURIComponent(clerkId)}`);
+        const response = await axios.get<ResolvedUserResponse>(toApiUrl(`/api/users/resolve/${encodeURIComponent(clerkId)}`));
         if (!isMounted) return;
         setSelfDbUserId(response.data?.id || null);
       } catch {
@@ -235,7 +229,23 @@ export default function Messages() {
   }, [clerkId]);
 
   const selectedChat = conversations.find((c) => c.id === selectedConversation);
-  const roomId = selectedChat?.roomId || null;
+  const roomId = useMemo(() => {
+    if (!selectedChat) {
+      return null;
+    }
+
+    if (selectedChat.roomId) {
+      return selectedChat.roomId;
+    }
+
+    // Fallback for old match records without roomId.
+    if (selfDbUserId && selectedChat.userId) {
+      return `dm-${[selfDbUserId, selectedChat.userId].sort().join("-")}`;
+    }
+
+    return null;
+  }, [selectedChat, selfDbUserId]);
+
   const effectiveRoomId = isMessagesLocked ? null : roomId;
   const roomDerivedDbUserId = useMemo(() => {
     if (!roomId || !selectedChat?.userId || !roomId.startsWith("dm-")) {
@@ -260,7 +270,19 @@ export default function Messages() {
   const mappedLiveMessages = useMemo(() => {
     return (liveMessages || []).map((msg: any, index: number) => {
       const isImage = msg?.type === "IMAGE";
-      const mine = msg?.senderId ? msg.senderId === currentDbUserId || msg.senderId === userId : false;
+      const senderId = typeof msg?.senderId === "string" ? msg.senderId : "";
+
+      const mineCandidates = [currentDbUserId, selfDbUserId, clerkId, userId].filter(
+        (value): value is string => Boolean(value)
+      );
+
+      let mine = senderId ? mineCandidates.includes(senderId) : false;
+
+      // Defensive fallback for DM rooms when sender format differs across environments.
+      if (!mine && senderId && selectedChat?.userId) {
+        mine = senderId !== selectedChat.userId;
+      }
+
       return {
         id: msg?.id || `${msg?.timestamp || "msg"}-${index}`,
         message: isImage ? "" : msg?.content || "",
@@ -270,7 +292,7 @@ export default function Messages() {
         status: mine ? ("sent" as const) : undefined,
       };
     });
-  }, [currentDbUserId, liveMessages, userId]);
+  }, [clerkId, currentDbUserId, liveMessages, selectedChat?.userId, selfDbUserId, userId]);
 
   const {
     isInCall,
@@ -289,7 +311,13 @@ export default function Messages() {
   const callTargetId = selectedChat?.clerkId || null;
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (!messagesViewportRef.current) {
+      return;
+    }
+
+    // Keep latest message visible when opening room and when new messages arrive.
+    const viewport = messagesViewportRef.current;
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
   }, [mappedLiveMessages.length, selectedConversation]);
 
   useEffect(() => {
@@ -469,7 +497,7 @@ export default function Messages() {
                 {callError ? ` | ${callError}` : ""}
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div ref={messagesViewportRef} className="flex-1 overflow-y-auto p-4 space-y-4">
                 {mappedLiveMessages.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No messages yet. Send the first message.</p>
                 ) : (

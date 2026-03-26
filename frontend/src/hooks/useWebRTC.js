@@ -1,10 +1,9 @@
 import { getApiToken } from "@/lib/clerkToken";
+import { resolveWebSocketUrl, toApiUrl } from "@/lib/runtimeApi";
 import { useAuth } from "@clerk/clerk-react";
-import { Client } from "@stomp/stompjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import SockJS from "sockjs-client/dist/sockjs";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const SIGNALING_WS_URL = resolveWebSocketUrl("/ws-signal");
 const SIGNALING_TYPES = new Set(["OFFER", "ANSWER", "ICE_CANDIDATE", "LEAVE"]);
 const DEFAULT_RTC_CONFIG = {
   iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
@@ -22,6 +21,11 @@ function parseSignalData(rawData) {
   return rawData;
 }
 
+function buildWebSocketUrl(baseUrl, token) {
+  const separator = baseUrl.includes("?") ? "&" : "?";
+  return `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
+}
+
 export function useWebRTC(roomId, senderId) {
   const { getToken, userId } = useAuth();
   const signalingSenderId = senderId || userId;
@@ -34,43 +38,47 @@ export function useWebRTC(roomId, senderId) {
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
 
-  const stompRef = useRef(null);
+  const wsRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const shouldReconnectRef = useRef(true);
+
   const peerConnectionRef = useRef(null);
   const pendingOfferRef = useRef(null);
   const pendingCallerRef = useRef(null);
   const pendingIceCandidatesRef = useRef([]);
+  const activeTargetIdRef = useRef(null);
   const rtcConfigRef = useRef(DEFAULT_RTC_CONFIG);
 
-  const topic = useMemo(() => {
-    if (!roomId) return null;
-    return `/topic/room/${roomId}`;
-  }, [roomId]);
+  const normalizedRoomId = useMemo(() => roomId || null, [roomId]);
 
   useEffect(() => {
     let isMounted = true;
+
     const loadIceServers = async () => {
       try {
         const token = await getApiToken(getToken);
-        const response = await fetch(`${API_BASE_URL}/api/webrtc/ice-servers`, {
+        const response = await fetch(toApiUrl("/api/webrtc/ice-servers"), {
           headers: token
             ? {
                 Authorization: `Bearer ${token}`,
               }
             : {},
         });
-        if (!response.ok) {
+
+        if (!response.ok || !isMounted) {
           return;
         }
+
         const payload = await response.json();
         const servers = Array.isArray(payload)
           ? payload
           : Array.isArray(payload?.iceServers)
           ? payload.iceServers
           : [];
-        if (!isMounted || servers.length === 0) {
-          return;
+
+        if (servers.length > 0) {
+          rtcConfigRef.current = { iceServers: servers };
         }
-        rtcConfigRef.current = { iceServers: servers };
       } catch {
         rtcConfigRef.current = DEFAULT_RTC_CONFIG;
       }
@@ -84,25 +92,27 @@ export function useWebRTC(roomId, senderId) {
 
   const sendSignal = useCallback(
     (type, data, targetId = null) => {
-      const client = stompRef.current;
-      if (!client || !client.connected || !roomId) {
+      const socket = wsRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN || !normalizedRoomId) {
         setCallError("Signaling is not connected.");
         return false;
       }
 
-      client.publish({
-        destination: "/app/webrtc.signal",
-        body: JSON.stringify({
-          roomId,
-          senderId: signalingSenderId,
+      if (!SIGNALING_TYPES.has(type)) {
+        return false;
+      }
+
+      socket.send(
+        JSON.stringify({
+          roomId: normalizedRoomId,
           targetId,
           type,
           data,
-        }),
-      });
+        })
+      );
       return true;
     },
-    [roomId, signalingSenderId]
+    [normalizedRoomId]
   );
 
   const cleanupPeerConnection = useCallback(() => {
@@ -113,16 +123,18 @@ export function useWebRTC(roomId, senderId) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+
     pendingIceCandidatesRef.current = [];
     pendingOfferRef.current = null;
     pendingCallerRef.current = null;
+    activeTargetIdRef.current = null;
     setRemoteStream(null);
   }, []);
 
   const stopLocalMedia = useCallback(() => {
-    setLocalStream((prevStream) => {
-      if (prevStream) {
-        prevStream.getTracks().forEach((track) => track.stop());
+    setLocalStream((prev) => {
+      if (prev) {
+        prev.getTracks().forEach((track) => track.stop());
       }
       return null;
     });
@@ -138,7 +150,10 @@ export function useWebRTC(roomId, senderId) {
 
       peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
-          sendSignal("ICE_CANDIDATE", JSON.stringify(event.candidate), targetId);
+          const relayTarget = targetId || activeTargetIdRef.current || pendingCallerRef.current;
+          if (relayTarget) {
+            sendSignal("ICE_CANDIDATE", JSON.stringify(event.candidate), relayTarget);
+          }
         }
       };
 
@@ -183,17 +198,22 @@ export function useWebRTC(roomId, senderId) {
   }, []);
 
   const flushPendingIceCandidates = useCallback(async (peerConnection) => {
-    const pendingCandidates = [...pendingIceCandidatesRef.current];
+    const pending = [...pendingIceCandidatesRef.current];
     pendingIceCandidatesRef.current = [];
-    for (const candidate of pendingCandidates) {
+
+    for (const candidate of pending) {
       await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     }
   }, []);
 
   const startCall = useCallback(
     async (mode = "video", targetId = null) => {
-      if (!roomId) {
+      if (!normalizedRoomId) {
         setCallError("Missing roomId.");
+        return;
+      }
+      if (!targetId) {
+        setCallError("Missing target user id.");
         return;
       }
 
@@ -201,6 +221,7 @@ export function useWebRTC(roomId, senderId) {
         setCallError(null);
         setIncomingCall(null);
         setCallMode(mode);
+        activeTargetIdRef.current = targetId;
 
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: true,
@@ -228,7 +249,7 @@ export function useWebRTC(roomId, senderId) {
         setCallError(error?.message || "Could not start call.");
       }
     },
-    [attachStreamToPeer, ensurePeerConnection, roomId, sendSignal]
+    [attachStreamToPeer, ensurePeerConnection, normalizedRoomId, sendSignal]
   );
 
   const acceptIncomingCall = useCallback(async () => {
@@ -241,6 +262,7 @@ export function useWebRTC(roomId, senderId) {
 
       setCallError(null);
       setIncomingCall(null);
+      activeTargetIdRef.current = callerId;
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
@@ -276,7 +298,10 @@ export function useWebRTC(roomId, senderId) {
   }, [sendSignal]);
 
   const endCall = useCallback(() => {
-    sendSignal("LEAVE", "{}");
+    const targetId = activeTargetIdRef.current || pendingCallerRef.current;
+    if (targetId) {
+      sendSignal("LEAVE", "{}", targetId);
+    }
     cleanupPeerConnection();
     stopLocalMedia();
     setIncomingCall(null);
@@ -285,37 +310,40 @@ export function useWebRTC(roomId, senderId) {
   }, [cleanupPeerConnection, sendSignal, stopLocalMedia]);
 
   useEffect(() => {
-    if (!topic) {
+    if (!normalizedRoomId || !signalingSenderId) {
       setIsSignalingConnected(false);
       return undefined;
     }
 
-    const client = new Client({
-      webSocketFactory: () => new SockJS(`${API_BASE_URL}/ws`),
-      reconnectDelay: 5000,
-      debug: () => {},
-      beforeConnect: async () => {
+    shouldReconnectRef.current = true;
+
+    const connect = async () => {
+      try {
         const token = await getApiToken(getToken);
         if (!token) {
-          throw new Error("Missing auth token");
+          setCallError("Missing auth token for signaling.");
+          return;
         }
-        client.connectHeaders = {
-          Authorization: `Bearer ${token}`,
-        };
-      },
-      onConnect: () => {
-        setIsSignalingConnected(true);
-        setCallError(null);
 
-        client.subscribe(topic, async (frame) => {
+        const socket = new WebSocket(buildWebSocketUrl(SIGNALING_WS_URL, token));
+        wsRef.current = socket;
+
+        socket.onopen = () => {
+          setIsSignalingConnected(true);
+          setCallError(null);
+        };
+
+        socket.onmessage = async (event) => {
           try {
-            const payload = JSON.parse(frame.body);
+            const payload = JSON.parse(event.data);
             if (!payload?.type || !SIGNALING_TYPES.has(payload.type)) {
               return;
             }
-            if (payload.targetId && payload.targetId !== signalingSenderId) {
+
+            if (payload.roomId && payload.roomId !== normalizedRoomId) {
               return;
             }
+
             if (payload.senderId && payload.senderId === signalingSenderId) {
               return;
             }
@@ -339,6 +367,7 @@ export function useWebRTC(roomId, senderId) {
               setCallMode(incomingMode);
               pendingOfferRef.current = offer;
               pendingCallerRef.current = payload.senderId || null;
+              activeTargetIdRef.current = payload.senderId || null;
               pendingIceCandidatesRef.current = [];
               setIncomingCall({
                 fromId: payload.senderId || "Unknown",
@@ -372,36 +401,42 @@ export function useWebRTC(roomId, senderId) {
           } catch (error) {
             setCallError(error?.message || "Signaling processing failed.");
           }
-        });
-      },
-      onWebSocketClose: () => {
-        setIsSignalingConnected(false);
-      },
-      onWebSocketError: () => {
-        setIsSignalingConnected(false);
-        setCallError("WebRTC signaling transport error.");
-      },
-      onStompError: (frame) => {
-        setIsSignalingConnected(false);
-        setCallError(frame.headers?.message || "STOMP signaling error.");
-      },
-    });
+        };
 
-    client.activate();
-    stompRef.current = client;
+        socket.onerror = () => {
+          setIsSignalingConnected(false);
+        };
+
+        socket.onclose = () => {
+          setIsSignalingConnected(false);
+          if (shouldReconnectRef.current) {
+            reconnectTimerRef.current = window.setTimeout(connect, 3000);
+          }
+        };
+      } catch (error) {
+        setCallError(error?.message || "Failed to connect signaling socket.");
+      }
+    };
+
+    connect();
 
     return () => {
-      if (stompRef.current) {
-        stompRef.current.deactivate();
-        stompRef.current = null;
+      shouldReconnectRef.current = false;
+      if (reconnectTimerRef.current) {
+        window.clearTimeout(reconnectTimerRef.current);
       }
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+
       cleanupPeerConnection();
       stopLocalMedia();
       setIncomingCall(null);
       setIsSignalingConnected(false);
       setIsInCall(false);
     };
-  }, [cleanupPeerConnection, flushPendingIceCandidates, getToken, signalingSenderId, stopLocalMedia, topic]);
+  }, [cleanupPeerConnection, flushPendingIceCandidates, getToken, normalizedRoomId, signalingSenderId, stopLocalMedia]);
 
   return {
     isSignalingConnected,
@@ -418,4 +453,3 @@ export function useWebRTC(roomId, senderId) {
     endCall,
   };
 }
-

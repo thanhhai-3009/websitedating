@@ -4,8 +4,9 @@ import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client/dist/sockjs";
 import axios from "axios";
 import { getApiToken } from "@/lib/clerkToken";
+import { resolveApiBaseUrl, toApiUrl } from "@/lib/runtimeApi";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const API_BASE_URL = resolveApiBaseUrl();
 const CHAT_TYPES = new Set(["CHAT", "IMAGE", "JOIN", "LEAVE"]);
 
 function toAbsoluteUrl(url) {
@@ -14,9 +15,9 @@ function toAbsoluteUrl(url) {
     return url;
   }
   if (url.startsWith("/")) {
-    return `${API_BASE_URL}${url}`;
+    return API_BASE_URL ? `${API_BASE_URL}${url}` : url;
   }
-  return `${API_BASE_URL}/${url}`;
+  return API_BASE_URL ? `${API_BASE_URL}/${url}` : `/${url}`;
 }
 
 function messageKey(value) {
@@ -49,7 +50,7 @@ export function useChat(roomId) {
     const loadHistory = async () => {
       try {
         const token = await getApiToken(getToken);
-        const response = await axios.get(`${API_BASE_URL}/api/chats/rooms/${encodeURIComponent(roomId)}/messages`, {
+        const response = await axios.get(toApiUrl(`/api/chats/rooms/${encodeURIComponent(roomId)}/messages`), {
           params: { limit: 120 },
           headers: token
               ? {
@@ -69,7 +70,7 @@ export function useChat(roomId) {
     loadHistory();
 
     const client = new Client({
-      webSocketFactory: () => new SockJS(`${API_BASE_URL}/ws`),
+      webSocketFactory: () => new SockJS(toApiUrl("/ws")),
       reconnectDelay: 5000,
       debug: () => {},
       beforeConnect: async () => {
@@ -171,7 +172,7 @@ export function useChat(roomId) {
           const formData = new FormData();
           formData.append("file", file);
 
-          const uploadResponse = await axios.post(`${API_BASE_URL}/api/files/upload`, formData, {
+          const uploadResponse = await axios.post(toApiUrl("/api/files/upload"), formData, {
             headers: {
               Authorization: `Bearer ${token}`,
               "Content-Type": "multipart/form-data",

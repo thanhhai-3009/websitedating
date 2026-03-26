@@ -5,6 +5,7 @@ import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client/dist/sockjs";
 import { toast } from "@/hooks/use-toast";
 import { getApiToken } from "@/lib/clerkToken";
+import { toApiUrl } from "@/lib/runtimeApi";
 
 export interface NotificationData {
   matchedUserId?: string;
@@ -28,7 +29,6 @@ export interface AppNotification {
   createdAt: string;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 const POLLING_MS = Number.parseInt(import.meta.env.VITE_NOTIFICATIONS_POLLING_MS || "10000", 10);
 const shownToastKeys = new Set<string>();
 
@@ -70,7 +70,7 @@ export function useNotifications() {
     queryKey: ["notifications", "unread", userId],
     queryFn: async () => {
       if (!userId) return [];
-      const res = await fetch(`/api/notifications/unread?clerkId=${encodeURIComponent(userId)}`);
+      const res = await fetch(toApiUrl(`/api/notifications/unread?clerkId=${encodeURIComponent(userId)}`));
       if (!res.ok) throw new Error("Failed to fetch unread notifications");
       return res.json() as Promise<AppNotification[]>;
     },
@@ -82,7 +82,7 @@ export function useNotifications() {
     queryKey: ["notifications", "all", userId],
     queryFn: async () => {
       if (!userId) return [];
-      const res = await fetch(`/api/notifications?clerkId=${encodeURIComponent(userId)}`);
+      const res = await fetch(toApiUrl(`/api/notifications?clerkId=${encodeURIComponent(userId)}`));
       if (!res.ok) throw new Error("Failed to fetch all notifications");
       return res.json() as Promise<AppNotification[]>;
     },
@@ -95,7 +95,7 @@ export function useNotifications() {
     }
 
     const client = new Client({
-      webSocketFactory: () => new SockJS(`${API_BASE_URL}/ws`),
+      webSocketFactory: () => new SockJS(toApiUrl("/ws")),
       reconnectDelay: 5000,
       debug: () => {},
       beforeConnect: async () => {
@@ -162,7 +162,7 @@ export function useNotifications() {
   const markAsRead = useMutation({
     mutationFn: async (notificationId: string) => {
       if (!userId) throw new Error("Not authenticated");
-      const res = await fetch(`/api/notifications/${notificationId}/read?clerkId=${encodeURIComponent(userId)}`, {
+      const res = await fetch(toApiUrl(`/api/notifications/${notificationId}/read?clerkId=${encodeURIComponent(userId)}`), {
         method: "PUT",
       });
       if (!res.ok) throw new Error("Failed to mark as read");
