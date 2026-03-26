@@ -10,10 +10,14 @@ import java.util.List;
 import com.example.websitedating.constants.CommonEnums.AppointmentStatus;
 import java.util.Map;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class AppointmentService {
+    private static final Logger logger = LoggerFactory.getLogger(AppointmentService.class);
+
     private final AppointmentRepository repo;
     private final UserRepository userRepository;
     private final NotificationService notificationService;
@@ -67,14 +71,31 @@ public class AppointmentService {
                 // Send detailed appointment email via SMTP to participant.
                 Optional<User> participantUser = resolveUser(saved.getParticipantId());
                 Optional<User> creatorUser = resolveUser(saved.getCreatorId());
+
+                logger.info(
+                        "Appointment created: appointmentId={}, creatorId={}, participantId={}, creatorResolved={}, participantResolved={}",
+                        saved.getId(),
+                        saved.getCreatorId(),
+                        saved.getParticipantId(),
+                        creatorUser.isPresent(),
+                        participantUser.isPresent()
+                );
+
                 participantUser.ifPresent(user -> appointmentEmailService.sendCreatedAppointmentEmail(user, creatorUser.orElse(null), saved));
 
                 // Also send to creator so both sides receive full booking details.
                 creatorUser.ifPresent(user -> appointmentEmailService.sendCreatedAppointmentEmail(user, participantUser.orElse(null), saved));
+
+                if (participantUser.isEmpty()) {
+                    logger.warn("Cannot send participant appointment email: participant not found for userRef={}", saved.getParticipantId());
+                }
+                if (creatorUser.isEmpty()) {
+                    logger.warn("Cannot send creator appointment email: creator not found for userRef={}", saved.getCreatorId());
+                }
             }
         } catch (Exception ex) {
             // log but don't fail the appointment creation
-            ex.printStackTrace();
+            logger.error("Error while creating appointment notifications/emails, appointmentId={}", saved.getId(), ex);
         }
 
         return saved;
