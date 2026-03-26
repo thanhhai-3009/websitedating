@@ -3,11 +3,47 @@ import { resolveWebSocketUrl, toApiUrl } from "@/lib/runtimeApi";
 import { useAuth } from "@clerk/clerk-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const SIGNALING_WS_URL = resolveWebSocketUrl("/ws-signal");
 const SIGNALING_TYPES = new Set(["OFFER", "ANSWER", "ICE_CANDIDATE", "LEAVE"]);
 const DEFAULT_RTC_CONFIG = {
   iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
 };
+
+function buildTrackConstraint(deviceId) {
+  if (!deviceId) {
+    return true;
+  }
+  return { deviceId: { exact: deviceId } };
+}
+
+function buildMediaConstraints(mode, mediaPreferences = null) {
+  const audioInputDeviceId = mediaPreferences?.audioInputDeviceId || null;
+  const videoInputDeviceId = mediaPreferences?.videoInputDeviceId || null;
+
+  return {
+    audio: buildTrackConstraint(audioInputDeviceId),
+    video: mode === "video" ? buildTrackConstraint(videoInputDeviceId) : false,
+  };
+}
+
+async function getPreferredUserMedia(mode, mediaPreferences = null) {
+  const constraints = buildMediaConstraints(mode, mediaPreferences);
+  try {
+    return await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (error) {
+    const hasPreferredDevice = Boolean(
+      mediaPreferences?.audioInputDeviceId || mediaPreferences?.videoInputDeviceId
+    );
+    if (!hasPreferredDevice) {
+      throw error;
+    }
+
+    // Fallback to default devices if the selected one is unavailable.
+    return navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: mode === "video",
+    });
+  }
+}
 
 function parseSignalData(rawData) {
   if (!rawData) return null;
@@ -26,9 +62,10 @@ function buildWebSocketUrl(baseUrl, token) {
   return `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
 }
 
-export function useWebRTC(roomId, senderId) {
+export function useWebRTC(roomId, senderId, mediaPreferences = null) {
   const { getToken, userId } = useAuth();
   const signalingSenderId = senderId || userId;
+  const signalingWsUrl = useMemo(() => resolveWebSocketUrl("/ws-signal"), []);
 
   const [isSignalingConnected, setIsSignalingConnected] = useState(false);
   const [callError, setCallError] = useState(null);
@@ -47,6 +84,7 @@ export function useWebRTC(roomId, senderId) {
   const pendingCallerRef = useRef(null);
   const pendingIceCandidatesRef = useRef([]);
   const activeTargetIdRef = useRef(null);
+  const activeSignalRoomIdRef = useRef(null);
   const rtcConfigRef = useRef(DEFAULT_RTC_CONFIG);
 
   const normalizedRoomId = useMemo(() => roomId || null, [roomId]);
@@ -91,9 +129,9 @@ export function useWebRTC(roomId, senderId) {
   }, [getToken]);
 
   const sendSignal = useCallback(
-    (type, data, targetId = null) => {
+    (type, data, targetId = null, roomIdOverride = null) => {
       const socket = wsRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN || !normalizedRoomId) {
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
         setCallError("Signaling is not connected.");
         return false;
       }
@@ -104,7 +142,7 @@ export function useWebRTC(roomId, senderId) {
 
       socket.send(
         JSON.stringify({
-          roomId: normalizedRoomId,
+          roomId: roomIdOverride || activeSignalRoomIdRef.current || normalizedRoomId || null,
           targetId,
           type,
           data,
@@ -128,6 +166,7 @@ export function useWebRTC(roomId, senderId) {
     pendingOfferRef.current = null;
     pendingCallerRef.current = null;
     activeTargetIdRef.current = null;
+    activeSignalRoomIdRef.current = null;
     setRemoteStream(null);
   }, []);
 
@@ -208,10 +247,6 @@ export function useWebRTC(roomId, senderId) {
 
   const startCall = useCallback(
     async (mode = "video", targetId = null) => {
-      if (!normalizedRoomId) {
-        setCallError("Missing roomId.");
-        return;
-      }
       if (!targetId) {
         setCallError("Missing target user id.");
         return;
@@ -222,11 +257,9 @@ export function useWebRTC(roomId, senderId) {
         setIncomingCall(null);
         setCallMode(mode);
         activeTargetIdRef.current = targetId;
+        activeSignalRoomIdRef.current = normalizedRoomId || null;
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: mode === "video",
-        });
+        const stream = await getPreferredUserMedia(mode, mediaPreferences);
         setLocalStream(stream);
 
         const peerConnection = ensurePeerConnection(targetId);
@@ -249,7 +282,7 @@ export function useWebRTC(roomId, senderId) {
         setCallError(error?.message || "Could not start call.");
       }
     },
-    [attachStreamToPeer, ensurePeerConnection, normalizedRoomId, sendSignal]
+    [attachStreamToPeer, ensurePeerConnection, mediaPreferences, normalizedRoomId, sendSignal]
   );
 
   const acceptIncomingCall = useCallback(async () => {
@@ -264,10 +297,7 @@ export function useWebRTC(roomId, senderId) {
       setIncomingCall(null);
       activeTargetIdRef.current = callerId;
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: callMode === "video",
-      });
+      const stream = await getPreferredUserMedia(callMode, mediaPreferences);
       setLocalStream(stream);
 
       const peerConnection = ensurePeerConnection(callerId);
@@ -284,12 +314,12 @@ export function useWebRTC(roomId, senderId) {
     } catch (error) {
       setCallError(error?.message || "Could not accept call.");
     }
-  }, [attachStreamToPeer, callMode, ensurePeerConnection, flushPendingIceCandidates, sendSignal]);
+  }, [attachStreamToPeer, callMode, ensurePeerConnection, flushPendingIceCandidates, mediaPreferences, sendSignal]);
 
   const rejectIncomingCall = useCallback(() => {
     const callerId = pendingCallerRef.current;
     if (callerId) {
-      sendSignal("LEAVE", JSON.stringify({ reason: "rejected" }), callerId);
+      sendSignal("LEAVE", JSON.stringify({ reason: "rejected" }), callerId, activeSignalRoomIdRef.current);
     }
     setIncomingCall(null);
     pendingOfferRef.current = null;
@@ -300,7 +330,7 @@ export function useWebRTC(roomId, senderId) {
   const endCall = useCallback(() => {
     const targetId = activeTargetIdRef.current || pendingCallerRef.current;
     if (targetId) {
-      sendSignal("LEAVE", "{}", targetId);
+      sendSignal("LEAVE", "{}", targetId, activeSignalRoomIdRef.current);
     }
     cleanupPeerConnection();
     stopLocalMedia();
@@ -325,7 +355,12 @@ export function useWebRTC(roomId, senderId) {
           return;
         }
 
-        const socket = new WebSocket(buildWebSocketUrl(SIGNALING_WS_URL, token));
+        if (!/^wss?:\/\//i.test(signalingWsUrl)) {
+          setCallError("Invalid signaling websocket URL in VITE_WEBRTC_WS_URL.");
+          return;
+        }
+
+        const socket = new WebSocket(buildWebSocketUrl(signalingWsUrl, token));
         wsRef.current = socket;
 
         socket.onopen = () => {
@@ -337,10 +372,6 @@ export function useWebRTC(roomId, senderId) {
           try {
             const payload = JSON.parse(event.data);
             if (!payload?.type || !SIGNALING_TYPES.has(payload.type)) {
-              return;
-            }
-
-            if (payload.roomId && payload.roomId !== normalizedRoomId) {
               return;
             }
 
@@ -368,6 +399,7 @@ export function useWebRTC(roomId, senderId) {
               pendingOfferRef.current = offer;
               pendingCallerRef.current = payload.senderId || null;
               activeTargetIdRef.current = payload.senderId || null;
+              activeSignalRoomIdRef.current = payload.roomId || normalizedRoomId || null;
               pendingIceCandidatesRef.current = [];
               setIncomingCall({
                 fromId: payload.senderId || "Unknown",
@@ -414,7 +446,7 @@ export function useWebRTC(roomId, senderId) {
           }
         };
       } catch (error) {
-        setCallError(error?.message || "Failed to connect signaling socket.");
+        setCallError(error?.message || `Failed to connect signaling socket: ${signalingWsUrl}`);
       }
     };
 
@@ -436,7 +468,7 @@ export function useWebRTC(roomId, senderId) {
       setIsSignalingConnected(false);
       setIsInCall(false);
     };
-  }, [cleanupPeerConnection, flushPendingIceCandidates, getToken, normalizedRoomId, signalingSenderId, stopLocalMedia]);
+  }, [cleanupPeerConnection, flushPendingIceCandidates, getToken, normalizedRoomId, signalingSenderId, signalingWsUrl, stopLocalMedia]);
 
   return {
     isSignalingConnected,

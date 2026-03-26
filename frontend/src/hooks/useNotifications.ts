@@ -32,6 +32,28 @@ export interface AppNotification {
 const POLLING_MS = Number.parseInt(import.meta.env.VITE_NOTIFICATIONS_POLLING_MS || "10000", 10);
 const shownToastKeys = new Set<string>();
 
+type ApiErrorPayload = {
+  message?: string;
+  error?: string;
+};
+
+const getErrorText = async (response: Response) => {
+  try {
+    const payload = (await response.json()) as ApiErrorPayload;
+    return `${payload.message || ""} ${payload.error || ""}`.trim().toLowerCase();
+  } catch {
+    return "";
+  }
+};
+
+const isUserNotFoundResponse = async (response: Response) => {
+  if (response.status !== 400 && response.status !== 404) {
+    return false;
+  }
+  const errorText = await getErrorText(response);
+  return errorText.includes("user not found");
+};
+
 const notificationIdentity = (value: AppNotification) =>
   value.id || `${value.userId}|${value.type}|${value.createdAt}|${value.content}`;
 
@@ -71,7 +93,12 @@ export function useNotifications() {
     queryFn: async () => {
       if (!userId) return [];
       const res = await fetch(toApiUrl(`/api/notifications/unread?clerkId=${encodeURIComponent(userId)}`));
-      if (!res.ok) throw new Error("Failed to fetch unread notifications");
+      if (!res.ok) {
+        if (await isUserNotFoundResponse(res)) {
+          return [];
+        }
+        throw new Error("Failed to fetch unread notifications");
+      }
       return res.json() as Promise<AppNotification[]>;
     },
     enabled: isLoaded && !!userId,
@@ -83,7 +110,12 @@ export function useNotifications() {
     queryFn: async () => {
       if (!userId) return [];
       const res = await fetch(toApiUrl(`/api/notifications?clerkId=${encodeURIComponent(userId)}`));
-      if (!res.ok) throw new Error("Failed to fetch all notifications");
+      if (!res.ok) {
+        if (await isUserNotFoundResponse(res)) {
+          return [];
+        }
+        throw new Error("Failed to fetch all notifications");
+      }
       return res.json() as Promise<AppNotification[]>;
     },
     enabled: isLoaded && !!userId,
@@ -165,7 +197,12 @@ export function useNotifications() {
       const res = await fetch(toApiUrl(`/api/notifications/${notificationId}/read?clerkId=${encodeURIComponent(userId)}`), {
         method: "PUT",
       });
-      if (!res.ok) throw new Error("Failed to mark as read");
+      if (!res.ok) {
+        if (await isUserNotFoundResponse(res)) {
+          return;
+        }
+        throw new Error("Failed to mark as read");
+      }
     },
     onMutate: async (notificationId: string) => {
       if (!userId) return;

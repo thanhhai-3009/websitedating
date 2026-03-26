@@ -106,6 +106,13 @@ export default function Messages() {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [isLoadingConversations, setIsLoadingConversations] = useState(false);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
+  const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [videoInputDevices, setVideoInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [audioOutputDevices, setAudioOutputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedAudioInputId, setSelectedAudioInputId] = useState("");
+  const [selectedVideoInputId, setSelectedVideoInputId] = useState("");
+  const [selectedAudioOutputId, setSelectedAudioOutputId] = useState("");
+  const [devicesError, setDevicesError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -114,6 +121,76 @@ export default function Messages() {
   const localAudioRef = useRef<HTMLAudioElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
+  const hasAppliedPreselectedRef = useRef(false);
+
+  useEffect(() => {
+    hasAppliedPreselectedRef.current = false;
+  }, [preselectedConversationId]);
+
+  useEffect(() => {
+    if (!navigator?.mediaDevices?.enumerateDevices) {
+      setDevicesError("Media device selection is not supported in this browser.");
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    const loadDevices = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (!isMounted) {
+          return;
+        }
+
+        const inputs = devices.filter((device) => device.kind === "audioinput");
+        const cameras = devices.filter((device) => device.kind === "videoinput");
+        const outputs = devices.filter((device) => device.kind === "audiooutput");
+        setAudioInputDevices(inputs);
+        setVideoInputDevices(cameras);
+        setAudioOutputDevices(outputs);
+
+        setSelectedAudioInputId((previous) => {
+          if (previous && inputs.some((device) => device.deviceId === previous)) {
+            return previous;
+          }
+          return inputs[0]?.deviceId || "";
+        });
+
+        setSelectedAudioOutputId((previous) => {
+          if (previous && outputs.some((device) => device.deviceId === previous)) {
+            return previous;
+          }
+          return outputs[0]?.deviceId || "";
+        });
+
+        setSelectedVideoInputId((previous) => {
+          if (previous && cameras.some((device) => device.deviceId === previous)) {
+            return previous;
+          }
+          return cameras[0]?.deviceId || "";
+        });
+
+        setDevicesError(null);
+      } catch (error: any) {
+        if (!isMounted) {
+          return;
+        }
+        setDevicesError(error?.message || "Cannot enumerate media devices.");
+      }
+    };
+
+    loadDevices();
+
+    const handleDeviceChange = () => {
+      loadDevices();
+    };
+
+    navigator.mediaDevices.addEventListener?.("devicechange", handleDeviceChange);
+    return () => {
+      isMounted = false;
+      navigator.mediaDevices.removeEventListener?.("devicechange", handleDeviceChange);
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -163,26 +240,27 @@ export default function Messages() {
 
         setConversations(mappedConversations);
 
-        const hasPreselected =
-          preselectedConversationId
-          && mappedConversations.some(
-            (conversation) =>
-              conversation.id === preselectedConversationId
-              || conversation.userId === preselectedConversationId
-              || conversation.clerkId === preselectedConversationId
-          );
+        const preselectedMatch = preselectedConversationId
+          ? mappedConversations.find(
+              (conversation) =>
+                conversation.id === preselectedConversationId
+                || conversation.userId === preselectedConversationId
+                || conversation.clerkId === preselectedConversationId
+            )
+          : null;
 
-        if (hasPreselected) {
-          const matchedConversation = mappedConversations.find(
-            (conversation) =>
-              conversation.id === preselectedConversationId
-              || conversation.userId === preselectedConversationId
-              || conversation.clerkId === preselectedConversationId
-          );
-          setSelectedConversation(matchedConversation?.id || null);
-        } else if (!selectedConversation && mappedConversations.length > 0) {
-          setSelectedConversation(mappedConversations[0].id);
-        }
+        setSelectedConversation((previous) => {
+          if (preselectedMatch && !hasAppliedPreselectedRef.current) {
+            hasAppliedPreselectedRef.current = true;
+            return preselectedMatch.id;
+          }
+
+          if (previous && mappedConversations.some((conversation) => conversation.id === previous)) {
+            return previous;
+          }
+
+          return mappedConversations[0]?.id || null;
+        });
       } catch (loadError: any) {
         if (!isMounted) return;
         const message = loadError?.response?.data?.message || loadError?.message || "Cannot load matches from backend.";
@@ -294,6 +372,14 @@ export default function Messages() {
     });
   }, [clerkId, currentDbUserId, liveMessages, selectedChat?.userId, selfDbUserId, userId]);
 
+  const mediaPreferences = useMemo(
+    () => ({
+      audioInputDeviceId: selectedAudioInputId || null,
+      videoInputDeviceId: selectedVideoInputId || null,
+    }),
+    [selectedAudioInputId, selectedVideoInputId]
+  );
+
   const {
     isInCall,
     callMode,
@@ -306,7 +392,7 @@ export default function Messages() {
     acceptIncomingCall,
     rejectIncomingCall,
     endCall,
-  } = useWebRTC(effectiveRoomId, clerkId);
+  } = useWebRTC(effectiveRoomId, clerkId, mediaPreferences);
 
   const callTargetId = selectedChat?.clerkId || null;
 
@@ -340,6 +426,24 @@ export default function Messages() {
       remoteAudioRef.current.play().catch(() => {});
     }
   }, [remoteStream]);
+
+  useEffect(() => {
+    if (!selectedAudioOutputId || !remoteAudioRef.current) {
+      return;
+    }
+
+    const audioElement = remoteAudioRef.current as HTMLAudioElement & {
+      setSinkId?: (deviceId: string) => Promise<void>;
+    };
+
+    if (typeof audioElement.setSinkId !== "function") {
+      return;
+    }
+
+    audioElement.setSinkId(selectedAudioOutputId).catch((error: any) => {
+      setDevicesError(error?.message || "Cannot switch audio output device.");
+    });
+  }, [selectedAudioOutputId, remoteStream]);
 
   const handleSendMessage = async (message: string) => {
     if (!message.trim()) return;
@@ -489,12 +593,63 @@ export default function Messages() {
                 </div>
               </div>
 
+              <div className="px-4 py-2 border-b border-border bg-card/60 flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Microphone</span>
+                  <select
+                    className="h-8 max-w-56 rounded-md border border-input bg-background px-2 text-xs"
+                    value={selectedAudioInputId}
+                    onChange={(event) => setSelectedAudioInputId(event.target.value)}
+                  >
+                    {audioInputDevices.length === 0 && <option value="">Default</option>}
+                    {audioInputDevices.map((device, index) => (
+                      <option key={device.deviceId || `input-${index}`} value={device.deviceId}>
+                        {device.label || `Microphone ${index + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Camera</span>
+                  <select
+                    className="h-8 max-w-56 rounded-md border border-input bg-background px-2 text-xs"
+                    value={selectedVideoInputId}
+                    onChange={(event) => setSelectedVideoInputId(event.target.value)}
+                  >
+                    {videoInputDevices.length === 0 && <option value="">Default</option>}
+                    {videoInputDevices.map((device, index) => (
+                      <option key={device.deviceId || `video-${index}`} value={device.deviceId}>
+                        {device.label || `Camera ${index + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Speaker</span>
+                  <select
+                    className="h-8 max-w-56 rounded-md border border-input bg-background px-2 text-xs"
+                    value={selectedAudioOutputId}
+                    onChange={(event) => setSelectedAudioOutputId(event.target.value)}
+                  >
+                    {audioOutputDevices.length === 0 && <option value="">Default</option>}
+                    {audioOutputDevices.map((device, index) => (
+                      <option key={device.deviceId || `output-${index}`} value={device.deviceId}>
+                        {device.label || `Speaker ${index + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               <div className="px-4 py-2 text-xs text-muted-foreground border-b border-border">
                 {isConnected ? "Chat connected" : "Connecting chat..."}
                 {roomId ? ` | room: ${roomId}` : ""}
                 {conversationsError ? ` | ${conversationsError}` : ""}
                 {error ? ` | ${error}` : ""}
                 {callError ? ` | ${callError}` : ""}
+                {devicesError ? ` | ${devicesError}` : ""}
               </div>
 
               <div ref={messagesViewportRef} className="flex-1 overflow-y-auto p-4 space-y-4">
