@@ -79,6 +79,19 @@ public class UserOnboardingService {
         return UserResponse.from(user);
     }
 
+    public UserResponse resolveUser(String userRef) {
+        String normalizedRef = normalizeNullable(userRef);
+        if (normalizedRef == null) {
+            throw new IllegalArgumentException("User reference is required");
+        }
+
+        User user = userRepository.findByClerkId(normalizedRef)
+                .or(() -> userRepository.findById(normalizedRef))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        return UserResponse.from(user);
+    }
+
     private User ensureClerkLinked(User user, String clerkId) {
         if (user.getClerkId() != null && !user.getClerkId().equals(clerkId)) {
             throw new IllegalArgumentException("Email is already linked to another Clerk account");

@@ -267,6 +267,14 @@ const Appointments = () => {
 
       setAppointments(mapped);
 
+      // debug: log loaded appointments statuses to help troubleshoot missing cancelled items
+      try {
+        // eslint-disable-next-line no-console
+        console.debug('Appointments loaded (mapped):', mapped.map(m => ({ id: m.id, status: m.status, scheduledISO: m.scheduledISO })));
+      } catch (e) {
+        // ignore
+      }
+
       const completedIds = mapped.filter((value) => value.status === "completed").map((value) => value.id);
       await loadMyReviews(completedIds);
     } catch (err) {
@@ -276,6 +284,19 @@ const Appointments = () => {
 
   useEffect(() => {
     fetchAppointments();
+  }, [user, selfDbUserId]);
+
+  // listen for realtime appointment updates (fired by notifications) and refresh
+  useEffect(() => {
+    const handler = (e: any) => {
+      try {
+        fetchAppointments();
+      } catch (err) {
+        console.error('Error refreshing appointments after update event', err);
+      }
+    };
+    window.addEventListener('appointment-updated', handler as EventListener);
+    return () => window.removeEventListener('appointment-updated', handler as EventListener);
   }, [user, selfDbUserId]);
 
   const now = new Date();
@@ -292,21 +313,32 @@ const Appointments = () => {
     const end = addHours(sched, 2);
     // pending where scheduledTime already passed -> past
     if (a.status === 'pending' && now > sched) return false;
+    // treat incomplete as past
+    if (a.status === 'incomplete') return false;
     // confirmed but appointment window ended -> past
     if (a.status === 'confirmed' && end && now > end) return false;
     return a.status === 'confirmed' || a.status === 'pending' || a.status === 'incomplete';
   });
 
-  const past = appointments.filter(a => {
-    const sched = parseISO(a.scheduledISO);
-    const end = sched ? addHours(sched, 2) : null;
-    return (
-      a.status === 'completed' ||
-      a.status === 'cancelled' ||
-      (a.status === 'pending' && sched && now > sched) ||
-      (a.status === 'confirmed' && end && now > end)
-    );
-  });
+  const past = appointments
+    .filter(a => {
+      const sched = parseISO(a.scheduledISO);
+      const end = sched ? addHours(sched, 2) : null;
+      return (
+        a.status === 'completed' ||
+        a.status === 'incomplete' ||
+        a.status === 'cancelled' ||
+        a.status === 'canceled' ||
+        (a.status === 'pending' && sched && now > sched) ||
+        (a.status === 'confirmed' && end && now > end)
+      );
+    })
+    .sort((x, y) => {
+      const dx = x.scheduledISO ? new Date(x.scheduledISO).getTime() : 0;
+      const dy = y.scheduledISO ? new Date(y.scheduledISO).getTime() : 0;
+      if (dx === dy) return (y.id || '').localeCompare(x.id || '');
+      return dy - dx; // newest scheduled first
+    });
 
   const handleCancel = () => {
     if (!cancelId) return;

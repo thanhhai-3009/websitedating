@@ -31,6 +31,7 @@ interface AppointmentResponse {
   id: string;
   creatorId?: string;
   participantId?: string;
+  status?: string;
   scheduledTime?: string;
   location?: {
     placeName?: string;
@@ -93,6 +94,16 @@ export default function DateReview() {
         if (appointmentRes.ok) {
           const appointmentData = (await appointmentRes.json()) as AppointmentResponse;
           setAppointment(appointmentData);
+
+          // If appointment is not completed, do not allow review submission
+          if (appointmentData.status && String(appointmentData.status).toLowerCase() !== "completed") {
+            // still allow loading existing review (if any), but inform user
+            toast({
+              title: "Không thể viết review",
+              description: "Bạn chỉ có thể viết review cho các cuộc hẹn đã hoàn thành.",
+              variant: "destructive",
+            });
+          }
 
           const counterpartId =
             appointmentData.creatorId && appointmentData.creatorId !== appointmentData.participantId
@@ -161,6 +172,11 @@ export default function DateReview() {
     }
 
     try {
+      // prevent submit if appointment is not completed
+      if (appointment?.status && String(appointment.status).toLowerCase() !== "completed") {
+        toast({ title: "Không thể lưu review", description: "Chỉ có thể đánh giá cuộc hẹn đã hoàn thành.", variant: "destructive" });
+        return;
+      }
       const token = await getApiToken(getToken);
       if (!token) {
         throw new Error("Missing auth token");

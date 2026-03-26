@@ -3,11 +3,11 @@ package com.example.websitedating.services;
 import com.example.websitedating.models.Appointment;
 import com.example.websitedating.models.Notification;
 import com.example.websitedating.constants.CommonEnums.NotificationType;
-import com.example.websitedating.repository.NotificationRepository;
-import com.example.websitedating.services.NotificationService;
 import com.example.websitedating.repository.AppointmentRepository;
 import com.example.websitedating.repository.UserRepository;
+import com.example.websitedating.models.User;
 import java.util.List;
+import com.example.websitedating.constants.CommonEnums.AppointmentStatus;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
@@ -15,15 +15,20 @@ import org.springframework.stereotype.Service;
 @Service
 public class AppointmentService {
     private final AppointmentRepository repo;
-    private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
     private final NotificationService notificationService;
+    private final AppointmentEmailService appointmentEmailService;
 
-    public AppointmentService(AppointmentRepository repo, NotificationRepository notificationRepository, UserRepository userRepository, NotificationService notificationService) {
+    public AppointmentService(
+            AppointmentRepository repo,
+            UserRepository userRepository,
+            NotificationService notificationService,
+            AppointmentEmailService appointmentEmailService
+    ) {
         this.repo = repo;
-        this.notificationRepository = notificationRepository;
         this.userRepository = userRepository;
         this.notificationService = notificationService;
+        this.appointmentEmailService = appointmentEmailService;
     }
 
     public Appointment create(Appointment appt) {
@@ -58,6 +63,14 @@ public class AppointmentService {
                     .build();
                 // persist and push realtime
                 notificationService.saveAndPush(note);
+
+                // Send detailed appointment email via SMTP to participant.
+                Optional<User> participantUser = resolveUser(saved.getParticipantId());
+                Optional<User> creatorUser = resolveUser(saved.getCreatorId());
+                participantUser.ifPresent(user -> appointmentEmailService.sendCreatedAppointmentEmail(user, creatorUser.orElse(null), saved));
+
+                // Also send to creator so both sides receive full booking details.
+                creatorUser.ifPresent(user -> appointmentEmailService.sendCreatedAppointmentEmail(user, participantUser.orElse(null), saved));
             }
         } catch (Exception ex) {
             // log but don't fail the appointment creation
@@ -85,6 +98,75 @@ public class AppointmentService {
     }
 
     public void delete(String id) {
+        // Instead of deleting the appointment record, mark it as canceled so it shows up
+        // in the other user's Past list and keep audit/history.
+        try {
+            var opt = repo.findById(id);
+            if (opt.isPresent()) {
+                Appointment appt = opt.get();
+                appt.setStatus(AppointmentStatus.canceled);
+                repo.save(appt);
+
+                // Notify both parties if present
+                String creator = appt.getCreatorId();
+                String participant = appt.getParticipantId();
+                java.util.Set<String> notifyTargets = new java.util.HashSet<>();
+                if (creator != null && !creator.isBlank()) notifyTargets.add(creator);
+                if (participant != null && !participant.isBlank()) notifyTargets.add(participant);
+
+                for (String target : notifyTargets) {
+                    String notifUserId = target;
+                    try {
+                        var byClerk = userRepository.findByClerkId(target);
+                        if (byClerk.isPresent()) notifUserId = byClerk.get().getId();
+                        else {
+                            var byId = userRepository.findById(target);
+                            if (byId.isPresent()) notifUserId = byId.get().getId();
+                        }
+                    } catch (Exception e) {
+                        // ignore resolution failure
+                    }
+
+                    Notification note = Notification.builder()
+                        .userId(notifUserId)
+                        .type(NotificationType.appointment_updated)
+                        .content("An appointment was cancelled.")
+                        .data(Map.of("appointmentId", id))
+                        .build();
+                    try {
+                        notificationService.saveAndPush(note);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+                return;
+            }
+        } catch (Exception ex) {
+            // fallback to delete if something unexpected happens
+            ex.printStackTrace();
+        }
+
         repo.deleteById(id);
+    }
+
+    private Optional<User> resolveUser(String userRef) {
+        if (userRef == null || userRef.isBlank()) {
+            return Optional.empty();
+        }
+
+        try {
+            Optional<User> byClerk = userRepository.findByClerkId(userRef);
+            if (byClerk.isPresent()) {
+                return byClerk;
+            }
+        } catch (Exception ignored) {
+            // continue fallback resolution
+        }
+
+        try {
+            return userRepository.findById(userRef);
+        } catch (Exception ignored) {
+            return Optional.empty();
+        }
     }
 }

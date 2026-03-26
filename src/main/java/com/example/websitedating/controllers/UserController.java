@@ -30,10 +30,10 @@ public class UserController {
         return userOnboardingService.getProfileByClerkId(clerkId);
     }
 
-    @GetMapping("/resolve/{clerkId}")
+    @GetMapping("/resolve/{userRef}")
     @ResponseStatus(HttpStatus.OK)
-    public UserResponse resolveByClerkId(@PathVariable String clerkId) {
-        return userOnboardingService.getUserByClerkId(clerkId);
+    public UserResponse resolve(@PathVariable String userRef) {
+        return userOnboardingService.resolveUser(userRef);
     }
 
     @PostMapping("/onboarding")

@@ -12,12 +12,16 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class DateReviewService {
+
+    private static final Logger logger = LoggerFactory.getLogger(DateReviewService.class);
 
     private final DateReviewRepository dateReviewRepository;
     private final AppointmentRepository appointmentRepository;
@@ -36,14 +40,25 @@ public class DateReviewService {
         String reviewerUserId = resolveCurrentUserId(authPrincipal);
         Appointment appointment = appointmentRepository.findById(appointmentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Appointment not found"));
+        // Resolve creator/participant to internal Mongo ids where possible
+        String creatorRaw = appointment.getCreatorId();
+        String participantRaw = appointment.getParticipantId();
+        Optional<String> creatorResolved = resolveMongoUserId(creatorRaw);
+        Optional<String> participantResolved = resolveMongoUserId(participantRaw);
 
+        // Only allow reviews for completed appointments
         if (appointment.getStatus() != AppointmentStatus.completed) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only completed appointments can be reviewed");
         }
 
-        boolean isCreator = matchesReviewer(appointment.getCreatorId(), reviewerUserId, authPrincipal);
-        boolean isParticipant = matchesReviewer(appointment.getParticipantId(), reviewerUserId, authPrincipal);
+        boolean isCreator = (creatorResolved.isPresent() && creatorResolved.get().equals(reviewerUserId))
+                || (creatorRaw != null && (creatorRaw.equals(reviewerUserId) || creatorRaw.equals(authPrincipal)));
+        boolean isParticipant = (participantResolved.isPresent() && participantResolved.get().equals(reviewerUserId))
+                || (participantRaw != null && (participantRaw.equals(reviewerUserId) || participantRaw.equals(authPrincipal)));
+
         if (!isCreator && !isParticipant) {
+            logger.info("Forbidden review attempt: appointmentId={}, creatorRaw={}, creatorResolved={}, participantRaw={}, participantResolved={}, principal={}, reviewerUserId={}",
+                appointmentId, creatorRaw, creatorResolved.orElse(null), participantRaw, participantResolved.orElse(null), authPrincipal, reviewerUserId);
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot review this appointment");
         }
 
@@ -107,8 +122,18 @@ public class DateReviewService {
         if (appointmentPartyId == null || appointmentPartyId.isBlank()) {
             return false;
         }
-        return appointmentPartyId.equals(reviewerUserId)
-                || (authPrincipal != null && appointmentPartyId.equals(authPrincipal));
+        // Normalize appointment party id: it may be stored as a Mongo id or as a Clerk id.
+        try {
+            // If appointmentPartyId resolves to a mongo user id, compare normalized ids.
+            Optional<String> resolved = resolveMongoUserId(appointmentPartyId);
+            if (resolved.isPresent() && resolved.get().equals(reviewerUserId)) return true;
+        } catch (Exception ignored) {
+            // ignore resolution errors and fall back to raw comparisons
+        }
+
+        // direct string comparisons as fallback: internal id or clerk principal
+        if (appointmentPartyId.equals(reviewerUserId)) return true;
+        return (authPrincipal != null && appointmentPartyId.equals(authPrincipal));
     }
 
     private Optional<String> resolveMongoUserId(String value) {
