@@ -15,6 +15,12 @@ interface CurrentUser {
   premiumActive?: boolean;
 }
 
+function normalizeRole(role?: string | null): string {
+  if (!role) return "";
+  const upperRole = role.trim().toUpperCase();
+  return upperRole.startsWith("ROLE_") ? upperRole.slice(5) : upperRole;
+}
+
 export function useCurrentUser() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -50,5 +56,13 @@ export function useCurrentUser() {
     fetchMe();
   }, [getToken, isLoaded, isSignedIn]);
 
-  return { user, isLoading, isAdmin: user?.role === "ADMIN" };
+  const normalizedRole = normalizeRole(user?.role);
+
+  return {
+    user,
+    isLoading,
+    isAdmin: normalizedRole === "ADMIN",
+    isManager: normalizedRole === "MANAGER",
+    normalizedRole,
+  };
 }

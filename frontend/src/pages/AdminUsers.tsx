@@ -27,10 +27,17 @@ interface User {
   isVerified: boolean;
   isBanned?: boolean;
   banReason?: string;
+  banExpiresAt?: string;
   createdAt: string;
   profile?: {
     avatarUrl?: string;
   };
+}
+
+function normalizeRole(role?: string | null): string {
+  if (!role) return "USER";
+  const upperRole = role.trim().toUpperCase();
+  return upperRole.startsWith("ROLE_") ? upperRole.slice(5) : upperRole;
 }
 
 const AdminUsers = () => {
@@ -113,6 +120,22 @@ const AdminUsers = () => {
   const handleBanUser = async (userId: string, username: string) => {
     const reason = window.prompt(`Enter ban reason for "${username}":`, "Violation of community guidelines");
     if (reason === null) return;
+
+    const durationDaysText = window.prompt(
+      `Ban duration in days for "${username}" (e.g. 1, 3, 7, 30):`,
+      "7"
+    );
+    if (durationDaysText === null) return;
+    const durationDays = Number.parseInt(durationDaysText, 10);
+    if (!Number.isFinite(durationDays) || durationDays <= 0) {
+      toast({
+        title: "Invalid duration",
+        description: "Please enter a positive number of days.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const token = await getApiToken(getToken);
       const response = await fetch(`http://localhost:8080/api/admin/users/${userId}/ban`, {
@@ -121,10 +144,10 @@ const AdminUsers = () => {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ reason })
+        body: JSON.stringify({ reason, banDurationHours: durationDays * 24 })
       });
       if (!response.ok) throw new Error("Failed to ban user");
-      toast({ title: "✅ User banned", description: `"${username}" has been banned.` });
+      toast({ title: "✅ User banned", description: `"${username}" is banned for ${durationDays} day(s).` });
       fetchUsers();
     } catch {
       toast({ title: "Error banning user", variant: "destructive" });
@@ -277,7 +300,7 @@ const AdminUsers = () => {
                           </Badge>
                         ) : (
                           <Select
-                            defaultValue={user.role || "USER"}
+                            defaultValue={normalizeRole(user.role)}
                             onValueChange={(value) => handleRoleChange(user.id, user.username, value)}
                           >
                             <SelectTrigger className="h-8 w-[120px] text-xs rounded-full border-gray-200 bg-white/50">
@@ -294,6 +317,12 @@ const AdminUsers = () => {
                                 <div className="flex items-center gap-1.5">
                                   <ShieldCheck className="w-3.5 h-3.5 text-primary" />
                                   ADMIN
+                                </div>
+                              </SelectItem>
+                              <SelectItem value="MANAGER">
+                                <div className="flex items-center gap-1.5">
+                                  <ShieldCheck className="w-3.5 h-3.5 text-blue-500" />
+                                  MANAGER
                                 </div>
                               </SelectItem>
                             </SelectContent>

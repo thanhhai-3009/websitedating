@@ -7,6 +7,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Locale;
@@ -101,6 +102,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private boolean isBanned(User user, HttpServletResponse response) throws IOException {
         if (Boolean.TRUE.equals(user.getIsBanned())) {
+            Instant banExpiresAt = user.getBanExpiresAt();
+            if (banExpiresAt != null && !banExpiresAt.isAfter(Instant.now())) {
+                // Timed ban elapsed: unlock user automatically on next authenticated request.
+                user.setIsBanned(false);
+                user.setBanReason(null);
+                user.setBannedAt(null);
+                user.setBanExpiresAt(null);
+                user.setBanDurationHours(null);
+                userRepository.save(user);
+                return false;
+            }
+
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("application/json");
             String reason = user.getBanReason() != null ? user.getBanReason() : "Violation of community guidelines";

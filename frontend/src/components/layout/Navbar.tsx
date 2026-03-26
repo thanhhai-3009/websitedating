@@ -16,7 +16,7 @@ export const Navbar = ({ isAuthenticated = false }: NavbarProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
   const { unreadNotifications } = useNotifications();
-  const { isAdmin } = useCurrentUser();
+  const { isAdmin, isManager } = useCurrentUser();
   const unreadCount = unreadNotifications.length;
 
   const navLinks = isAuthenticated
@@ -25,10 +25,8 @@ export const Navbar = ({ isAuthenticated = false }: NavbarProps) => {
         { to: "/matches", label: "Matches", icon: Heart },
         { to: "/messages", label: "Chat", icon: MessageCircle, badge: 3 },
         { to: "/date-spots", label: "Date Spots", icon: MapPin },
-        ...(isAdmin ? [
-          { to: "/admin", label: "Admin", icon: ShieldAlert },
-          { to: "/manager/revenue", label: "Revenue", icon: TrendingUp }
-        ] : []),
+        ...(isAdmin ? [{ to: "/admin", label: "Admin", icon: ShieldAlert }] : []),
+        ...(isManager ? [{ to: "/manager/revenue", label: "Revenue", icon: TrendingUp }] : []),
         { to: "/appointments", label: "Appointments", icon: CalendarDays },
         { to: "/notifications", label: "Notifications", icon: Bell, badge: unreadCount > 0 ? unreadCount : undefined },
         { to: "/premium", label: "Premium", icon: Crown },
