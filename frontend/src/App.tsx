@@ -22,6 +22,7 @@ import DateReview from "./pages/DateReview";
 import AdminUsers from "./pages/AdminUsers";
 import AdminReports from "./pages/AdminReports";
 import BlockedUsers from "./pages/BlockedUsers";
+import ManagerRevenue from "./pages/ManagerRevenue";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -63,6 +64,7 @@ const App = () => (
           <Route path="/review/:id" element={<ProtectedRoute><DateReview /></ProtectedRoute>} />
           <Route path="/admin" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
           <Route path="/admin/reports" element={<ProtectedRoute><AdminReports /></ProtectedRoute>} />
+          <Route path="/manager/revenue" element={<ProtectedRoute><ManagerRevenue /></ProtectedRoute>} />
           <Route path="/blocked" element={<ProtectedRoute><BlockedUsers /></ProtectedRoute>} />
           <Route path="*" element={<ProtectedRoute><NotFound /></ProtectedRoute>} />
         </Routes>
