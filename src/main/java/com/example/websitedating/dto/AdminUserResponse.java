@@ -16,6 +16,9 @@ public class AdminUserResponse {
     private Boolean isVerified;
     private Boolean isBanned;
     private String banReason;
+    private Instant bannedAt;
+    private Instant banExpiresAt;
+    private Integer banDurationHours;
     private Instant createdAt;
     private ProfileDto profile;
 
@@ -42,6 +45,9 @@ public class AdminUserResponse {
                 .isVerified(user.getIsVerified())
                 .isBanned(user.getIsBanned())
                 .banReason(user.getBanReason())
+                .bannedAt(user.getBannedAt())
+                .banExpiresAt(user.getBanExpiresAt())
+                .banDurationHours(user.getBanDurationHours())
                 .createdAt(user.getCreatedAt())
                 .profile(profileDto)
                 .build();

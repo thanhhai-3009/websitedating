@@ -119,6 +119,22 @@ const AdminReports = () => {
   const handleBanUserFromReport = async (userId: string, username: string, reportId: string) => {
     const reason = window.prompt(`Enter ban reason for "${username}":`, "Violation of community guidelines based on user report");
     if (reason === null) return;
+
+    const durationDaysText = window.prompt(
+      `Ban duration in days for "${username}" (e.g. 1, 3, 7, 30):`,
+      "7"
+    );
+    if (durationDaysText === null) return;
+    const durationDays = Number.parseInt(durationDaysText, 10);
+    if (!Number.isFinite(durationDays) || durationDays <= 0) {
+      toast({
+        title: "Invalid duration",
+        description: "Please enter a positive number of days.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const token = await getApiToken(getToken);
       // Ban the user
@@ -128,7 +144,7 @@ const AdminReports = () => {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ reason })
+        body: JSON.stringify({ reason, banDurationHours: durationDays * 24 })
       });
       
       if (!banResponse.ok) throw new Error("Failed to ban user");
@@ -145,7 +161,7 @@ const AdminReports = () => {
 
       if (!resolveResponse.ok) throw new Error("Failed to resolve report after ban");
 
-      toast({ title: "✅ Action complete", description: `"${username}" has been banned and report resolved.` });
+      toast({ title: "✅ Action complete", description: `"${username}" is banned for ${durationDays} day(s) and the report is resolved.` });
       fetchReports(filter);
     } catch (error) {
       console.error(error);
@@ -175,7 +191,7 @@ const AdminReports = () => {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
             <div>
               <button 
-                onClick={() => navigate("/admin/users")}
+                onClick={() => navigate("/admin")}
                 className="text-sm text-primary flex items-center gap-1 hover:underline mb-2"
               >
                 <ChevronLeft className="w-4 h-4" />
