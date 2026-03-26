@@ -45,6 +45,7 @@ public class SecurityConfig {
                         "/api/discovery/**",
                         "/api/chats/**",
                         "/api/appointments/**",
+                        "/appointments/**",
                         "/api/notifications/**",
                         "/api/payments/momo/return",
                         "/api/payments/momo/ipn",

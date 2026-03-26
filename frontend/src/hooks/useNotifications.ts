@@ -183,6 +183,15 @@ export function useNotifications() {
                 });
               }
             }
+
+            // emit a global event for appointment updates so pages can react (e.g. refresh appointments list)
+            if (incoming.type === "appointment_updated") {
+              try {
+                window.dispatchEvent(new CustomEvent("appointment-updated", { detail: incoming.data || {} }));
+              } catch (e) {
+                // ignore
+              }
+            }
           } catch {
             // Ignore malformed payload and let polling/backfill keep state consistent.
           }
