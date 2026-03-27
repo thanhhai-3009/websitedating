@@ -100,7 +100,7 @@ public class AppointmentEmailService {
 
                 MimeMessage mimeMessage = mailSender.createMimeMessage();
                 MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, "utf-8");
-                String appointmentIdForLink = appointmentId;
+                String appointmentIdForLink = (appointment != null && appointment.getId() != null) ? appointment.getId() : "pending";
                 String base = frontendUrl == null ? "http://localhost:5173" : frontendUrl.trim();
                 if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
                 String viewUrl = String.format("%s/appointments/%s", base, appointmentIdForLink);

@@ -7,6 +7,7 @@ import com.example.websitedating.dto.BanRequest;
 import com.example.websitedating.repository.UserRepository;
 import com.example.websitedating.services.ClerkService;
 import com.example.websitedating.services.ModerationService;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -57,11 +58,22 @@ public class AdminController {
         if (newRole == null || newRole.isBlank()) {
             return ResponseEntity.badRequest().build();
         }
+
+        String normalizedRole = normalizeRole(newRole);
+        if (!List.of("USER", "ADMIN", "MANAGER").contains(normalizedRole)) {
+            return ResponseEntity.badRequest().build();
+        }
+
         return userRepository.findById(id).map(user -> {
-            user.setRole(newRole.toUpperCase());
+            user.setRole(normalizedRole);
             userRepository.save(user);
             return ResponseEntity.ok(AdminUserResponse.from(user));
         }).orElse(ResponseEntity.notFound().build());
+    }
+
+    private String normalizeRole(String role) {
+        String upperRole = role.trim().toUpperCase(Locale.ROOT);
+        return upperRole.startsWith("ROLE_") ? upperRole.substring(5) : upperRole;
     }
 
     // ─── BAN MANAGEMENT ───────────────────────────────────────────────────────
@@ -70,7 +82,7 @@ public class AdminController {
     public ResponseEntity<AdminUserResponse> banUser(
             @PathVariable String id,
             @RequestBody BanRequest request) {
-        var user = moderationService.banUser(id, request.getReason());
+        var user = moderationService.banUser(id, request.getReason(), request.getBanDurationHours());
         return ResponseEntity.ok(AdminUserResponse.from(user));
     }
 

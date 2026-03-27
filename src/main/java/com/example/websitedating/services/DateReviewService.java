@@ -151,6 +151,7 @@ public class DateReviewService {
             return Optional.of(byClerkId.get().getId());
         }
 
-        return Optional.empty();
+        // Keep compatibility for legacy records where participant IDs were saved directly.
+        return Optional.of(value);
     }
 }

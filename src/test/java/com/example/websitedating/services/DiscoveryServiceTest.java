@@ -2,7 +2,6 @@ package com.example.websitedating.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -67,14 +66,14 @@ class DiscoveryServiceTest {
     }
 
     @Test
-    void acceptConnection_upgradesIncomingLikeToMatched() {
+    void acceptConnection_upgradesPendingToMatched() {
         User me = user("me-id", "clerk-me");
         User target = user("target-id", "clerk-target");
 
         Connection pending = Connection.builder()
                 .senderId(target.getId())
                 .receiverId(me.getId())
-                .status(ConnectionStatus.liked)
+                .status(ConnectionStatus.pending)
                 .interactionType(InteractionType.match_invite)
                 .build();
 
@@ -115,13 +114,15 @@ class DiscoveryServiceTest {
 
         discoveryService.acceptConnection("clerk-me", "target-id");
 
-        verify(connectionRepository, never()).save(org.mockito.ArgumentMatchers.any(Connection.class));
+        ArgumentCaptor<Connection> captor = ArgumentCaptor.forClass(Connection.class);
+        verify(connectionRepository).save(captor.capture());
+        assertEquals(ConnectionStatus.matched, captor.getValue().getStatus());
         verify(notificationService, times(0)).createMatchNotification("me-id", "target-id");
         verify(notificationService, times(0)).createMatchNotification("target-id", "me-id");
     }
 
     @Test
-    void acceptConnection_rejectsWhenNoIncomingLikeExists() {
+    void acceptConnection_createsNewConnectionWhenMissing() {
         User me = user("me-id", "clerk-me");
         User target = user("target-id", "clerk-target");
 
@@ -132,37 +133,17 @@ class DiscoveryServiceTest {
                 List.of("me-id", "target-id")))
                 .thenReturn(List.of());
 
-        assertThrows(IllegalArgumentException.class, () -> discoveryService.acceptConnection("clerk-me", "target-id"));
+        discoveryService.acceptConnection("clerk-me", "target-id");
 
-        verify(connectionRepository, never()).save(org.mockito.ArgumentMatchers.any(Connection.class));
-        verify(notificationService, never()).createMatchNotification("me-id", "target-id");
-        verify(notificationService, never()).createMatchNotification("target-id", "me-id");
-    }
-
-    @Test
-    void acceptConnection_rejectsWhenCurrentUserIsLikeSender() {
-        User me = user("me-id", "clerk-me");
-        User target = user("target-id", "clerk-target");
-
-        Connection outgoingLike = Connection.builder()
-                .senderId(me.getId())
-                .receiverId(target.getId())
-                .status(ConnectionStatus.liked)
-                .interactionType(InteractionType.match_invite)
-                .build();
-
-        when(userRepository.findByClerkId("clerk-me")).thenReturn(Optional.of(me));
-        when(userRepository.findById("target-id")).thenReturn(Optional.of(target));
-        when(connectionRepository.findBySenderIdInAndReceiverIdIn(
-                List.of("me-id", "target-id"),
-                List.of("me-id", "target-id")))
-                .thenReturn(List.of(outgoingLike));
-
-        assertThrows(IllegalArgumentException.class, () -> discoveryService.acceptConnection("clerk-me", "target-id"));
-
-        verify(connectionRepository, never()).save(org.mockito.ArgumentMatchers.any(Connection.class));
-        verify(notificationService, never()).createMatchNotification("me-id", "target-id");
-        verify(notificationService, never()).createMatchNotification("target-id", "me-id");
+        ArgumentCaptor<Connection> captor = ArgumentCaptor.forClass(Connection.class);
+        verify(connectionRepository).save(captor.capture());
+        Connection saved = captor.getValue();
+        assertEquals(ConnectionStatus.matched, saved.getStatus());
+        assertEquals("target-id", saved.getSenderId());
+        assertEquals("me-id", saved.getReceiverId());
+        assertEquals(InteractionType.match_invite, saved.getInteractionType());
+        verify(notificationService).createMatchNotification("me-id", "target-id");
+        verify(notificationService).createMatchNotification("target-id", "me-id");
     }
 
     @Test

@@ -1,9 +1,11 @@
 package com.example.websitedating.security;
 
+import java.util.List;
 import java.util.Arrays;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -20,23 +22,28 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final List<String> allowedOrigins;
 
-    @Value("${app.cors.allowed-origins}")
-    private String allowedOrigins;
-
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
+    public SecurityConfig(
+            JwtAuthenticationFilter jwtAuthenticationFilter,
+            @Value("${app.cors.allowed-origins:http://localhost:5173,https://*.trycloudflare.com}") String allowedOrigins) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.allowedOrigins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .toList();
     }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .cors(Customizer.withDefaults())
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                     .requestMatchers(
                         "/ws/**",
+                        "/ws-signal/**",
                         "/api/auth/register",
                         "/api/auth/login",
                         "/api/users/onboarding",
@@ -55,6 +62,7 @@ public class SecurityConfig {
                         "/error")
                         .permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/revenue/**").hasRole("MANAGER")
                         .anyRequest()
                         .authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
@@ -70,16 +78,20 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(Arrays.stream(allowedOrigins.split(","))
-                .map(String::trim)
-                .filter(value -> !value.isBlank())
-                .toList());
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(Arrays.asList("*"));
+        configuration.setAllowedOriginPatterns(allowedOrigins);
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+        configuration.setAllowedHeaders(List.of(
+                "Authorization",
+                "Cache-Control",
+                "Content-Type",
+                "Accept",
+                "Origin",
+                "X-Requested-With"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }
+
 }

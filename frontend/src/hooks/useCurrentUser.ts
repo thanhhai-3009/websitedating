@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
 import { getApiToken } from "@/lib/clerkToken";
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+
 interface CurrentUser {
   id: string;
   clerkId: string;
@@ -11,6 +13,12 @@ interface CurrentUser {
   premiumPlan?: string;
   premiumExpiresAt?: string;
   premiumActive?: boolean;
+}
+
+function normalizeRole(role?: string | null): string {
+  if (!role) return "";
+  const upperRole = role.trim().toUpperCase();
+  return upperRole.startsWith("ROLE_") ? upperRole.slice(5) : upperRole;
 }
 
 export function useCurrentUser() {
@@ -31,7 +39,7 @@ export function useCurrentUser() {
           setUser(null);
           return;
         }
-        const res = await fetch("http://localhost:8080/api/auth/me", {
+        const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (res.ok) {
@@ -48,5 +56,13 @@ export function useCurrentUser() {
     fetchMe();
   }, [getToken, isLoaded, isSignedIn]);
 
-  return { user, isLoading, isAdmin: user?.role === "ADMIN" };
+  const normalizedRole = normalizeRole(user?.role);
+
+  return {
+    user,
+    isLoading,
+    isAdmin: normalizedRole === "ADMIN",
+    isManager: normalizedRole === "MANAGER",
+    normalizedRole,
+  };
 }

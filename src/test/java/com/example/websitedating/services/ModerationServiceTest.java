@@ -80,7 +80,7 @@ public class ModerationServiceTest {
         when(userRepository.findById("target-id")).thenReturn(Optional.of(target));
         when(userRepository.save(any())).thenReturn(target);
 
-        moderationService.banUser("target-id", "Spam");
+        moderationService.banUser("target-id", "Spam", null);
 
         assertTrue(target.getIsBanned());
         assertEquals("Spam", target.getBanReason());

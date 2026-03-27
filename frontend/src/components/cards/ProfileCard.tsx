@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { HeartHandshake, X, MapPin, Verified, AlertTriangle, ShieldOff } from "lucide-react";
+import { HeartHandshake, X, MapPin, Verified, AlertTriangle, ShieldOff, BookOpenText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -15,9 +15,11 @@ interface ProfileCardProps {
     interests: string[];
     verified: boolean;
     distance?: string;
+    reasonHint?: string;
   };
   onMatch?: () => void;
   onPass?: () => void;
+  onViewBio?: () => void;
   onReport?: () => void;
   onBlock?: () => void;
   className?: string;
@@ -27,6 +29,7 @@ export const ProfileCard = ({
   user,
   onMatch,
   onPass,
+  onViewBio,
   onReport,
   onBlock,
   className,
@@ -52,7 +55,23 @@ export const ProfileCard = ({
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
         
-        {/* Top Actions (Report/Block) */}
+        {/* Top Actions */}
+        <div className="absolute top-4 left-4">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 rounded-full bg-black/30 hover:bg-black/45 text-white backdrop-blur-md px-3"
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewBio?.();
+            }}
+            title="View Bio"
+          >
+            <BookOpenText className="w-4 h-4 mr-1.5" />
+            Bio
+          </Button>
+        </div>
+
         <div className="absolute top-4 right-4 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
           <Button
             size="icon"
@@ -75,7 +94,7 @@ export const ProfileCard = ({
         </div>
 
         {/* Info Overlay */}
-        <div className="absolute bottom-0 left-0 right-0 p-6 text-white">
+        <div className="absolute bottom-0 left-0 right-0 p-6 pb-28 text-white">
           <div className="flex items-center gap-2 mb-1">
             <h3 className="font-serif text-2xl font-semibold">
               {user.name}, {user.age}
@@ -91,7 +110,14 @@ export const ProfileCard = ({
               <span className="ml-1">• {user.distance}</span>
             )}
           </div>
-          <p className="text-sm text-white/90 line-clamp-2 mb-3">{user.bio}</p>
+          {user.reasonHint && (
+            <Badge
+              variant="secondary"
+              className="mb-3 bg-white/25 text-white border-0 backdrop-blur-sm"
+            >
+              {user.reasonHint}
+            </Badge>
+          )}
           <div className="flex flex-wrap gap-2">
             {user.interests.slice(0, 3).map((interest) => (
               <Badge
@@ -107,7 +133,7 @@ export const ProfileCard = ({
       </div>
 
       {/* Action Buttons */}
-      <div className="absolute bottom-6 left-0 right-0 flex items-center justify-center gap-4 px-6">
+      <div className="absolute bottom-5 left-0 right-0 flex items-center justify-center gap-4 px-6">
         <Button
           size="icon"
           variant="soft"

@@ -7,12 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { CalendarDays, Clock, MapPin, MessageCircle, Star, Trash2, Edit, Plus } from "lucide-react";
+import { CalendarDays, Clock, MapPin, MessageCircle, Star, Trash2, Edit, Plus, Crown } from "lucide-react";
 import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { useUser, useAuth } from "@clerk/clerk-react";
 import { getApiToken } from "@/lib/clerkToken";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { cn } from "@/lib/utils";
 
 interface Appointment {
   id: string;
@@ -66,6 +68,9 @@ const Appointments = () => {
   const { toast } = useToast();
   const { user } = useUser();
   const { getToken } = useAuth();
+  const { user: currentUser, isLoading: isCurrentUserLoading } = useCurrentUser();
+  const isPremiumUser = Boolean(currentUser?.premiumActive);
+  const isAppointmentsLocked = Boolean(user?.id) && !isCurrentUserLoading && !isPremiumUser;
 
   useEffect(() => {
     let cancelled = false;
@@ -283,8 +288,13 @@ const Appointments = () => {
   };
 
   useEffect(() => {
+    if (isAppointmentsLocked) {
+      setAppointments([]);
+      setReviewsByAppointmentId({});
+      return;
+    }
     fetchAppointments();
-  }, [user, selfDbUserId]);
+  }, [user, selfDbUserId, isAppointmentsLocked]);
 
   // listen for realtime appointment updates (fired by notifications) and refresh
   useEffect(() => {
@@ -590,6 +600,8 @@ const Appointments = () => {
 
   return (
     <Layout isAuthenticated>
+      <div className="relative">
+      <div className={cn(isAppointmentsLocked && "blur-sm pointer-events-none select-none")}>
       <div className="container mx-auto px-4 py-8 max-w-3xl">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
           <div className="flex items-center justify-between mb-8">
@@ -620,6 +632,9 @@ const Appointments = () => {
                 </div>
               )}
             </TabsContent>
+
+
+
 
             <TabsContent value="past" className="space-y-4">
               {past.map(apt => (
@@ -710,6 +725,31 @@ const Appointments = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </div>
+
+      {isAppointmentsLocked && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/50 backdrop-blur-[2px] px-4">
+          <div className="max-w-md w-full rounded-2xl border border-border bg-card/95 p-6 text-center shadow-xl">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gold text-white">
+              <Crown className="h-6 w-6" />
+            </div>
+            <h2 className="text-xl font-semibold text-foreground">Premium required for Appointments</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Upgrade to Premium to unlock appointment management and booking workflows.
+            </p>
+            <Button className="mt-5" variant="gradient" onClick={() => navigate("/premium")}>
+              Upgrade to Premium
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {Boolean(user?.id) && isCurrentUserLoading && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
+          <p className="text-sm text-muted-foreground">Checking premium access...</p>
+        </div>
+      )}
+      </div>
     </Layout>
   );
 };

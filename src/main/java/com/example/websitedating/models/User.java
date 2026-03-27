@@ -57,6 +57,10 @@ public class User {
 
     private Instant bannedAt;
 
+    private Instant banExpiresAt;
+
+    private Integer banDurationHours;
+
     private Profile profile;
     private Preferences preferences;
     private BehaviorSignals behaviorSignals;
