@@ -19,6 +19,8 @@ import org.springframework.stereotype.Service;
 public class AppointmentEmailService {
     private static final Logger logger = LoggerFactory.getLogger(AppointmentEmailService.class);
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm, dd/MM/yyyy");
+    private static final DateTimeFormatter DATE_ONLY_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+    private static final DateTimeFormatter TIME_ONLY_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
 
     private final JavaMailSender mailSender;
 
@@ -39,6 +41,9 @@ public class AppointmentEmailService {
 
     @Value("${app.mail.timezone:Asia/Ho_Chi_Minh}")
     private String timeZone;
+
+    @Value("${app.frontend.url:http://localhost:5173}")
+    private String frontendUrl;
 
     public AppointmentEmailService(JavaMailSender mailSender) {
         this.mailSender = mailSender;
@@ -79,6 +84,12 @@ public class AppointmentEmailService {
                 String formattedTime = appointment.getScheduledTime() == null
                     ? "Not specified"
                     : TIME_FORMATTER.withZone(ZoneId.of(timeZone)).format(appointment.getScheduledTime());
+                String dateOnly = appointment.getScheduledTime() == null
+                    ? "Not specified"
+                    : DATE_ONLY_FORMATTER.withZone(ZoneId.of(timeZone)).format(appointment.getScheduledTime());
+                String timeOnly = appointment.getScheduledTime() == null
+                    ? "Not specified"
+                    : TIME_ONLY_FORMATTER.withZone(ZoneId.of(timeZone)).format(appointment.getScheduledTime());
 
                 String placeName = appointment.getLocation() != null && appointment.getLocation().getPlaceName() != null
                     ? appointment.getLocation().getPlaceName()
@@ -89,7 +100,12 @@ public class AppointmentEmailService {
 
                 MimeMessage mimeMessage = mailSender.createMimeMessage();
                 MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, "utf-8");
-                String htmlBody = buildHtmlBody(recipientName, otherName, appointment, formattedTime, placeName, address);
+                String appointmentIdForLink = appointmentId;
+                String base = frontendUrl == null ? "http://localhost:5173" : frontendUrl.trim();
+                if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+                String viewUrl = String.format("%s/appointments/%s", base, appointmentIdForLink);
+
+                String htmlBody = buildHtmlBody(recipientName, otherName, appointment, dateOnly, timeOnly, placeName, address, viewUrl);
                 helper.setFrom(sender != null ? sender.trim() : null);
                 helper.setTo(recipientEmail);
                 helper.setSubject("[Heartly] Appointment Confirmation");
@@ -142,42 +158,54 @@ public class AppointmentEmailService {
             String recipientName,
             String otherName,
             Appointment appointment,
-            String formattedTime,
+            String dateOnly,
+            String timeOnly,
             String placeName,
-            String address
+            String address,
+            String viewUrl
         ) {
-        String title = appointment.getTitle() == null || appointment.getTitle().isBlank()
-            ? "Appointment"
+        String service = appointment.getTitle() == null || appointment.getTitle().isBlank()
+            ? "Service"
             : appointment.getTitle();
         String appointmentId = appointment.getId() == null ? "(pending)" : appointment.getId();
 
+        // Build a clean, professional English HTML email with improved styling
         return String.format(
             Locale.ROOT,
             "<!doctype html>"
                 + "<html lang=\"en\"><head><meta charset=\"utf-8\"/></head>"
-                + "<body style=\"margin:0;padding:20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#0b1220;line-height:1.4;\">"
-                + "<div style=\"max-width:680px;margin:0 auto;background:#ffffff;border:1px solid #e6e9ee;padding:20px;border-radius:8px;\">"
-                + "<h1 style=\"font-size:20px;margin:0 0 8px;\">Appointment Confirmation</h1>"
-                + "<p style=\"margin:0 0 12px;color:#55607a;\">Hello %s,</p>"
-                + "<p style=\"margin:0 0 12px;color:#334155;\">Your appointment has been scheduled. Please find the details below.</p>"
-                + "<table role=\"presentation\" style=\"width:100%%;border-collapse:collapse;font-size:14px;color:#16324f;\">"
-                + "<tr><td style=\"padding:6px 0;width:140px;color:#55607a;font-weight:600;\">Title</td><td style=\"padding:6px 0;\">%s</td></tr>"
-                + "<tr><td style=\"padding:6px 0;color:#55607a;font-weight:600;\">With</td><td style=\"padding:6px 0;\">%s</td></tr>"
-                + "<tr><td style=\"padding:6px 0;color:#55607a;font-weight:600;\">Date & Time</td><td style=\"padding:6px 0;\">%s</td></tr>"
-                + "<tr><td style=\"padding:6px 0;color:#55607a;font-weight:600;\">Location</td><td style=\"padding:6px 0;\">%s</td></tr>"
-                + "<tr><td style=\"padding:6px 0;color:#55607a;font-weight:600;\">Address</td><td style=\"padding:6px 0;\">%s</td></tr>"
-                + "<tr><td style=\"padding:6px 0;color:#55607a;font-weight:600;\">Appointment ID</td><td style=\"padding:6px 0;\">%s</td></tr>"
-                + "</table>"
-                + "<p style=\"margin:16px 0 0;color:#667085;\">Please open the app to view or update your appointment.</p>"
-                + "<p style=\"margin:16px 0 0;color:#334155;\">Regards,<br/>Heartly Team</p>"
-                + "</div></body></html>",
+                + "<body style=\"margin:0;padding:20px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#0b1220;line-height:1.4;background:#f3f6fb;\">"
+                + "<div style=\"max-width:680px;margin:20px auto;background:#ffffff;border-radius:8px;box-shadow:0 6px 24px rgba(11,61,145,0.08);overflow:hidden;\">"
+                + "<div style=\"background:#0b3d91;color:#ffffff;padding:18px 22px;\">"
+                + "<h2 style=\"margin:0;font-size:20px;font-weight:600;\">Appointment Confirmation</h2>"
+                + "</div>"
+                + "<div style=\"padding:22px;\">"
+                + "<p style=\"margin:0 0 10px;color:#55607a;\">Hello %s,</p>"
+                + "<p style=\"margin:0 0 18px;color:#334155;\">Your appointment has been scheduled. Please find the details below.</p>"
+                + "<div style=\"font-size:15px;color:#16324f;line-height:1.6;\">"
+                + "<p><span style=\"margin-right:8px;\">📅</span><strong>Date:</strong> %s</p>"
+                + "<p><span style=\"margin-right:8px;\">⏰</span><strong>Time:</strong> %s</p>"
+                + "<p><span style=\"margin-right:8px;\">🛠️</span><strong>Service:</strong> %s</p>"
+                + "<p><span style=\"margin-right:8px;\">👤</span><strong>With:</strong> %s</p>"
+                + "<p><span style=\"margin-right:8px;\">📍</span><strong>Location:</strong> %s</p>"
+                + "<p><span style=\"margin-right:8px;\">🏠</span><strong>Address:</strong> %s</p>"
+                + "<p><span style=\"margin-right:8px;\">🆔</span><strong>Appointment ID:</strong> %s</p>"
+                + "</div>"
+                + "<div style=\"margin-top:20px;text-align:center;\">"
+                + "<a href=\"%s\" style=\"display:inline-block;background:#0b3d91;color:#ffffff;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:600;\">View Appointment</a>"
+                + "</div>"
+                + "<p style=\"margin:18px 0 0;color:#667085;\">Please open the app to view or update your appointment.</p>"
+                + "<p style=\"margin:16px 0 0;color:#334155;\">Best regards,<br/>[Your Team]</p>"
+                + "</div></div></body></html>",
             recipientName,
-            title,
+            dateOnly,
+            timeOnly,
+            service,
             otherName,
-            formattedTime,
             placeName,
             address,
-            appointmentId
+            appointmentId,
+            viewUrl
         );
         }
 
